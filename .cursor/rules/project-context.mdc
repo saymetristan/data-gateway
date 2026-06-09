@@ -1,0 +1,28 @@
+---
+description: Contexto general del proyecto — stack, arquitectura y convenciones
+alwaysApply: true
+---
+
+# Tsuzuro Data Gateway
+
+Infraestructura que convierte fuentes de datos de negocio (DB externas vía database URL, Shopify, CSV) en tools tipadas consultables por agentes de IA. Plan completo en `docs/DEVELOPMENT_PLAN.md`.
+
+## Stack
+
+- Monorepo pnpm: `apps/api` (Hono), `apps/worker` (pg-boss), `packages/core`, `packages/mcp-server`
+- TypeScript estricto, Node.js, Zod en todos los boundaries
+- Postgres 16 + pgvector + pg_trgm + unaccent; full-text config `spanish`
+- Drizzle ORM + migraciones SQL
+- Jobs: pg-boss (Postgres, encolado transaccional) — NO Redis/BullMQ
+- Embeddings: `qwen/qwen3-embedding-8b` vía OpenRouter, `dimensions: 1024` (límite HNSW 2000)
+- LLM (solo ingest/fallback parsing): `nvidia/nemotron-3-ultra-550b-a55b:free` vía OpenRouter
+
+## Principios no negociables
+
+- El query-path funciona SIN LLM: filtros determinísticos + híbrida (lexical + vector + RRF)
+- El LLM nunca genera SQL ni decide permisos; solo rellena slots tipados validados contra el mapping
+- Campos `sensitive`/`visible: false` jamás salen del Gateway
+- Sin schema canónico físico: tabla `records` JSONB + mapping versionado como metadata
+- `indexed` ≠ `agent-ready`: el gate de evals es obligatorio
+- Enriquecimiento IA solo en ingest, nunca en query-time
+- Confidence determinístico por señales de retrieval, no por LLM

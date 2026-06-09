@@ -1,0 +1,12 @@
+# Supabase MCP
+When interacting with the production database, ALWAYS use the `data-gateway-supabase` MCP defined in `.cursor/mcp.json`. Do NOT use the global `supabase` MCP.
+
+The MCP binary is the local server at `/Users/Jorge-tristan/.cursor/mcp-servers/supabase-mcp-enhanced/dist/index.js`.
+It uses `SUPABASE_ACCESS_TOKEN` and `SUPABASE_PROJECT_REF` (project: data-ingest, org: whaapy) in env.
+Do NOT configure the hosted Supabase MCP as the primary project MCP.
+
+# Railway MCP
+When interacting with Railway, ALWAYS use the `data-gateway-railway` MCP defined in `.cursor/mcp.json`. Do NOT use the global `railway` MCP.
+
+The MCP binary is the local fork at `/Users/Jorge-tristan/.cursor/mcp-servers/railway-mcp-local/dist/index.js` (not `npx @railway/mcp-server`). It uses `RAILWAY_API_TOKEN` (account) + `RAILWAY_TOKEN` (project: data-gateway) so account- and project-scoped tools both work.
+All tools that need `workspacePath` should use `/Users/Jorge-tristan/Desktop/data-gateway`.

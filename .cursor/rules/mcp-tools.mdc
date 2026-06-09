@@ -1,0 +1,16 @@
+---
+description: Reglas de uso de MCPs del proyecto
+alwaysApply: true
+---
+
+# MCPs del proyecto
+
+| Tarea | MCP | Notas |
+| --- | --- | --- |
+| DB de producción (migraciones, queries, schema, RLS) | `data-gateway-supabase` | `apply_migration` para DDL, `execute_sql` para queries; proyecto `data-ingest` |
+| Railway (servicios, variables, logs, deploys) | `data-gateway-railway` | `RAILWAY_TOKEN` = project token de `data-gateway`; `RAILWAY_API_TOKEN` = cuenta (list/create) |
+
+- Toda operación contra la DB de producción va por el MCP de Supabase, NO con CLI local ni connection strings ad-hoc
+- La DB local de desarrollo (Docker Compose) se opera con `drizzle-kit` y `psql` normales
+- NO usar los MCPs globales `supabase`/`railway`; usar los project-scoped con prefijo `data-gateway-`
+- OpenRouter (LLM + embeddings) no tiene MCP: es una dependencia de runtime vía `OPENROUTER_API_KEY`

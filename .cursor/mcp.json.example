@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "data-gateway-supabase": {
+      "command": "node",
+      "args": [
+        "/Users/YOUR_USER/.cursor/mcp-servers/supabase-mcp-enhanced/dist/index.js"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "YOUR_SUPABASE_PAT",
+        "SUPABASE_PROJECT_REF": "zrwnxulqnyeuzhajbeju"
+      }
+    },
+    "data-gateway-railway": {
+      "command": "node",
+      "args": [
+        "/Users/YOUR_USER/.cursor/mcp-servers/railway-mcp-local/dist/index.js"
+      ],
+      "env": {
+        "RAILWAY_API_TOKEN": "YOUR_RAILWAY_ACCOUNT_TOKEN",
+        "RAILWAY_TOKEN": "YOUR_RAILWAY_PROJECT_TOKEN"
+      }
+    }
+  }
+}

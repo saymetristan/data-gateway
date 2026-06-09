@@ -1,0 +1,16 @@
+---
+description: Prácticas de seguridad — tokens, encriptación, RLS, validación
+alwaysApply: true
+---
+
+# Seguridad
+
+- API keys de workspace: almacenar solo hash (sha-256), scoped por `workspace_id`; nunca loggear la key
+- Credenciales de DBs externas de clientes: cifradas en reposo (AES-256-GCM con `CREDENTIALS_ENCRYPTION_KEY` de env), nunca en texto plano en `sources.config` ni en logs
+- Conexiones a DBs externas: siempre read-only; validar permisos al crear la fuente
+- RLS de Postgres por `workspace_id` además del scoping en app (defensa en profundidad)
+- Todo request/response validado con Zod; rechazar campos no declarados en el mapping
+- No SQL libre: el LLM produce representación estructurada que el backend compila a queries parametrizadas
+- Campos `sensitive`/`visible: false`: filtrarlos en la capa de respuesta, no confiar en el SELECT
+- Secrets solo en `.env` (gitignored); `.cursor/mcp.json` con tokens reales también gitignored
+- Aislamiento multi-tenant: toda query lleva `workspace_id`; tests de cross-workspace obligatorios

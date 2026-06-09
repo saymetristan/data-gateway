@@ -1,0 +1,26 @@
+---
+description: Pipeline de deploy — flujo, verificación, reglas
+alwaysApply: true
+---
+
+# Deploy
+
+## Infra
+
+- Producción: Railway proyecto `data-gateway` (servicios: api, worker) + Supabase proyecto `data-ingest` (Postgres prod, ref `zrwnxulqnyeuzhajbeju`)
+- Dominio objetivo de la API: `data.whaapy.com` (configurar en Railway cuando el servicio api exista)
+- Local: Docker Compose (Postgres con pgvector/pg_trgm/unaccent)
+
+## Flujo
+
+1. Verificar local: `pnpm typecheck && pnpm lint && pnpm test`
+2. Migraciones a prod: aplicar el SQL generado por Drizzle vía MCP `data-gateway-supabase` (`apply_migration`), NO con CLI de Supabase ni `drizzle-kit push` contra prod
+3. Push a `main` → deploy de api y worker en Railway
+4. Verificación post-deploy: healthcheck de la API, logs de Railway sin errores de arranque, jobs de pg-boss procesando
+
+## Reglas
+
+- NO levantar `supabase start` local; el Postgres local es el de Docker Compose
+- NO deploy con migraciones sin aplicar en prod
+- NO exponer el worker públicamente; solo la API tiene dominio
+- Variables de entorno de Railway se gestionan vía MCP `data-gateway-railway`

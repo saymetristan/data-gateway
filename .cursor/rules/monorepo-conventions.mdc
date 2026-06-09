@@ -1,0 +1,16 @@
+---
+description: Convenciones del monorepo pnpm — estructura, imports, errores
+globs: ["apps/**/*.ts", "packages/**/*.ts"]
+alwaysApply: false
+---
+
+# Monorepo
+
+- `packages/core`: dominio compartido (schema DB, tipos, validadores Zod, query engine, tool compiler). Sin dependencias de Hono ni pg-boss
+- `apps/api`: solo HTTP (rutas Hono, middleware, serialización). La lógica vive en core
+- `apps/worker`: solo orquestación de jobs pg-boss. La lógica vive en core
+- `packages/mcp-server`: paquete publicable; consume la API REST, nunca importa core
+- Imports entre paquetes vía workspace protocol (`"@data-gateway/core": "workspace:*"`)
+- Proveedores externos (OpenRouter LLM/embeddings, conectores) detrás de interfaces en core; los tests usan mocks de esas interfaces
+- Errores: clases tipadas en core (`GatewayError` con `code`); la API las mapea a HTTP en un solo middleware. No try/catch decorativo
+- Scripts raíz: `pnpm dev`, `pnpm test`, `pnpm typecheck`, `pnpm lint` corren sobre todos los workspaces

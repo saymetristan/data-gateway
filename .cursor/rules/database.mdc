@@ -1,0 +1,18 @@
+---
+description: Convenciones de base de datos — Drizzle, migraciones, pgvector, pg-boss
+globs: ["packages/core/src/db/**/*.ts", "**/drizzle/**/*.sql", "**/migrations/**/*.sql"]
+alwaysApply: false
+---
+
+# Base de datos
+
+- Schema Drizzle en `packages/core/src/db/`; una sola fuente de verdad para api y worker
+- Naming: snake_case en SQL, camelCase en TS (Drizzle mapea)
+- Migraciones: `drizzle-kit generate` produce SQL versionado; local se aplica con `drizzle-kit migrate`, prod vía MCP `apply_migration`
+- Extensiones requeridas: `vector`, `pg_trgm`, `unaccent` (crear en la migración 0)
+- `records.search_text`: columna generada `tsvector` con config `spanish` + `unaccent`
+- Embeddings: `vector(1024)` — NO subir de 2000 dims (límite HNSW de pgvector); índice HNSW con `vector_cosine_ops`
+- Campos filtrables viven en `records.data` (JSONB) con índice GIN; no crear columnas físicas por entidad
+- Toda tabla multi-tenant lleva `workspace_id` NOT NULL + política RLS
+- pg-boss usa su propio schema (`pgboss`); encolar jobs en la MISMA transacción que la escritura de datos relacionada
+- Versionado: `records.mapping_version` y `record_embeddings.embedding_model` + dims son obligatorios en cada write

@@ -1,0 +1,13 @@
+---
+description: Workflow de Git y GitHub
+alwaysApply: true
+---
+
+# Git
+
+- Repo único en la raíz del workspace (monolítico): `saymetristan/data-gateway` (privado)
+- Usar terminal para git/gh, no MCPs
+- Commits: conventional commits en inglés (`feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`)
+- Branch strategy: trunk-based — `main` deployable, ramas cortas `feat/...` o `fix/...` con merge a main
+- Nunca commitear: `.env`, `.cursor/mcp.json`, credenciales de clientes, dumps de datos
+- Antes de commit: `pnpm typecheck && pnpm lint`
