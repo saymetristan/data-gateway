@@ -1,10 +1,18 @@
 import { z } from 'zod';
 
+const encryptionKeySchema = z.string().refine((value) => {
+  try {
+    return Buffer.from(value, 'base64').length === 32;
+  } catch {
+    return false;
+  }
+}, 'must be base64-encoded 32 bytes');
+
 export const apiEnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   PORT: z.coerce.number().int().positive().default(3000),
   ADMIN_API_KEY: z.string().min(16),
-  CREDENTIALS_ENCRYPTION_KEY: z.string().min(1),
+  CREDENTIALS_ENCRYPTION_KEY: encryptionKeySchema,
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
 

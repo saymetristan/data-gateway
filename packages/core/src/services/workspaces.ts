@@ -91,7 +91,7 @@ export async function resolveApiKey(db: Database, rawKey: string) {
   return row;
 }
 
-export async function createSource(
+export async function createSourceUnsafeForTests(
   db: Database,
   workspaceId: string,
   input: CreateSourceInput,

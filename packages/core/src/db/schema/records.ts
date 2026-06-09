@@ -26,6 +26,7 @@ export const records = pgTable(
     entity: text('entity').notNull(),
     externalId: text('external_id').notNull(),
     data: jsonb('data').notNull().default({}),
+    sourceRecordHash: text('source_record_hash').notNull().default(''),
     mappingVersion: integer('mapping_version').notNull().default(0),
     searchSource: text('search_source').notNull().default(''),
     searchText: tsvector('search_text').generatedAlwaysAs(

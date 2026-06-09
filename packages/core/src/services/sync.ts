@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
-import { sourceRecordsRaw, sources } from '../db/schema/index.js';
+import { records, sourceRecordsRaw, sources } from '../db/schema/index.js';
 import { createDatabaseConnector } from '../connectors/factory.js';
 import { GatewayError } from '../errors/gateway-error.js';
 import { payloadHash } from '../utils/hash.js';
@@ -31,7 +31,7 @@ export async function syncDatabaseSource(
   const [source] = await db
     .select()
     .from(sources)
-    .where(eq(sources.id, sourceId))
+    .where(and(eq(sources.id, sourceId), eq(sources.workspaceId, workspaceId)))
     .limit(1);
 
   if (!source) {
@@ -49,6 +49,7 @@ export async function syncDatabaseSource(
 
   const connector = createDatabaseConnector(connectionUrl);
   let synced = 0;
+  const seenRecordIdsByTable = new Map<string, Set<string>>();
 
   try {
     const schema = await connector.introspectSchema();
@@ -58,16 +59,27 @@ export async function syncDatabaseSource(
       if (table.primaryKey.length === 0) continue;
 
       const tableKey = `${table.schema}.${table.name}`;
-      const cursorColumn = table.cursorColumn;
-      const cursorTieBreakerColumn = cursorColumn ? table.primaryKey[0] : undefined;
-      const cursorState = !options.fullSync && cursorColumn ? syncState[tableKey] : undefined;
-      const orderBy = cursorColumn
-        ? [cursorColumn, ...(cursorTieBreakerColumn ? [cursorTieBreakerColumn] : [])]
-        : table.primaryKey;
+      const businessCursorColumn = table.cursorColumn;
+      const primaryCursorColumn = table.primaryKey[0];
+      if (!primaryCursorColumn) continue;
+
+      const cursorColumn = businessCursorColumn ?? primaryCursorColumn;
+      const cursorTieBreakerColumn =
+        businessCursorColumn && businessCursorColumn !== primaryCursorColumn
+          ? primaryCursorColumn
+          : undefined;
+      const persistedState =
+        !options.fullSync && businessCursorColumn ? syncState[tableKey] : undefined;
+      const cursorState =
+        persistedState &&
+        (!cursorTieBreakerColumn || persistedState.cursorTieBreakerValue)
+          ? persistedState
+          : undefined;
+      const orderBy = [cursorColumn, ...(cursorTieBreakerColumn ? [cursorTieBreakerColumn] : [])];
       const streamOptions = {
         batchSize: 200,
         orderBy,
-        ...(!options.fullSync && cursorColumn
+        ...(cursorColumn
           ? {
               cursorColumn,
               ...(cursorTieBreakerColumn ? { cursorTieBreakerColumn } : {}),
@@ -80,11 +92,14 @@ export async function syncDatabaseSource(
       };
 
       for await (const batch of connector.streamRows(tableKey, streamOptions)) {
+        const seenForTable = seenRecordIdsByTable.get(table.name) ?? new Set<string>();
+        seenRecordIdsByTable.set(table.name, seenForTable);
         for (const row of batch) {
           const payload = { ...row, __table: table.name };
           const hash = payloadHash(payload);
           const externalId = table.primaryKey.map((key) => toScalarString(row[key])).join(':');
           const sourceRecordId = `${table.name}:${externalId}`;
+          seenForTable.add(sourceRecordId);
 
           const [existing] = await db
             .select({ payloadHash: sourceRecordsRaw.payloadHash })
@@ -121,7 +136,7 @@ export async function syncDatabaseSource(
           synced += 1;
         }
 
-        if (cursorColumn && batch.length > 0) {
+        if (businessCursorColumn && batch.length > 0) {
           const lastRow = batch[batch.length - 1];
           const value = lastRow?.[cursorColumn];
           if (value !== undefined && value !== null) {
@@ -146,6 +161,10 @@ export async function syncDatabaseSource(
       }
     }
 
+    if (options.fullSync) {
+      await removeStaleRecords(db, sourceId, seenRecordIdsByTable);
+    }
+
     await updateSourceConfig(db, sourceId, workspaceId, { syncState }, encryptionKey);
 
     await db
@@ -159,6 +178,45 @@ export async function syncDatabaseSource(
   } finally {
     await connector.close();
   }
+}
+
+async function removeStaleRecords(
+  db: Database,
+  sourceId: string,
+  seenRecordIdsByTable: Map<string, Set<string>>,
+): Promise<void> {
+  const rawRows = await db
+    .select({ id: sourceRecordsRaw.id, sourceRecordId: sourceRecordsRaw.sourceRecordId })
+    .from(sourceRecordsRaw)
+    .where(eq(sourceRecordsRaw.sourceId, sourceId));
+  const liveExternalIds = new Set<string>();
+
+  for (const row of rawRows) {
+    const tableName = row.sourceRecordId.split(':')[0] ?? '';
+    const seenForTable = seenRecordIdsByTable.get(tableName);
+    if (seenForTable && !seenForTable.has(row.sourceRecordId)) {
+      await db.delete(sourceRecordsRaw).where(eq(sourceRecordsRaw.id, row.id));
+      continue;
+    }
+
+    liveExternalIds.add(externalIdFromSourceRecordId(row.sourceRecordId));
+  }
+
+  const existingRecords = await db
+    .select({ id: records.id, externalId: records.externalId })
+    .from(records)
+    .where(eq(records.sourceId, sourceId));
+
+  for (const record of existingRecords) {
+    if (!liveExternalIds.has(record.externalId)) {
+      await db.delete(records).where(eq(records.id, record.id));
+    }
+  }
+}
+
+function externalIdFromSourceRecordId(sourceRecordId: string): string {
+  const separator = sourceRecordId.indexOf(':');
+  return separator === -1 ? sourceRecordId : sourceRecordId.slice(separator + 1);
 }
 
 function selectTables(schema: TableSchema[], configuredTables?: string[]): TableSchema[] {

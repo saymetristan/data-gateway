@@ -19,11 +19,12 @@ import {
   SOURCE_SYNC_JOB,
 } from '@data-gateway/core';
 import type { AppBindings, AppVariables } from '../app.js';
+import { requireScope } from '../middleware/auth.js';
 
 export function sourceRoutes(deps: AppBindings) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
-  routes.post('/', async (c) => {
+  routes.post('/', requireScope('sources:write'), async (c) => {
     const body: unknown = await c.req.json();
     const parsed = createSourceSchema.safeParse(body);
     if (!parsed.success) {
@@ -54,10 +55,10 @@ export function sourceRoutes(deps: AppBindings) {
     );
   });
 
-  routes.post('/:id/sync', async (c) => {
+  routes.post('/:id/sync', requireScope('sources:write'), async (c) => {
     const db = c.get('db');
     const workspaceId = c.get('workspaceId');
-    const sourceId = c.req.param('id');
+    const sourceId = sourceIdParam(c.req.param('id'));
     const source = await getSourceForWorkspace(db, workspaceId, sourceId);
 
     if (source.type !== 'database_url') {
@@ -73,10 +74,10 @@ export function sourceRoutes(deps: AppBindings) {
     return c.json({ jobId, status: 'queued' }, 202);
   });
 
-  routes.post('/:id/upload', async (c) => {
+  routes.post('/:id/upload', requireScope('sources:write'), async (c) => {
     const db = c.get('db');
     const workspaceId = c.get('workspaceId');
-    const sourceId = c.req.param('id');
+    const sourceId = sourceIdParam(c.req.param('id'));
     const source = await getSourceForWorkspace(db, workspaceId, sourceId);
 
     if (source.type !== 'csv') {
@@ -115,19 +116,19 @@ export function sourceRoutes(deps: AppBindings) {
     return c.json(result, 202);
   });
 
-  routes.get('/:id/profile', async (c) => {
+  routes.get('/:id/profile', requireScope('sources:read'), async (c) => {
     const db = c.get('db');
     const workspaceId = c.get('workspaceId');
-    const sourceId = c.req.param('id');
+    const sourceId = sourceIdParam(c.req.param('id'));
     await getSourceForWorkspace(db, workspaceId, sourceId);
     const profile = await getSourceProfile(db, sourceId);
     return c.json(profile);
   });
 
-  routes.post('/:id/mapping', async (c) => {
+  routes.post('/:id/mapping', requireScope('sources:write'), async (c) => {
     const db = c.get('db');
     const workspaceId = c.get('workspaceId');
-    const sourceId = c.req.param('id');
+    const sourceId = sourceIdParam(c.req.param('id'));
     await getSourceForWorkspace(db, workspaceId, sourceId);
 
     const body: unknown = await c.req.json();
@@ -149,10 +150,10 @@ export function sourceRoutes(deps: AppBindings) {
     );
   });
 
-  routes.post('/:id/index', async (c) => {
+  routes.post('/:id/index', requireScope('sources:write'), async (c) => {
     const db = c.get('db');
     const workspaceId = c.get('workspaceId');
-    const sourceId = c.req.param('id');
+    const sourceId = sourceIdParam(c.req.param('id'));
     await getSourceForWorkspace(db, workspaceId, sourceId);
     await getActiveMapping(db, sourceId);
 
@@ -164,10 +165,10 @@ export function sourceRoutes(deps: AppBindings) {
     return c.json({ jobId, status: 'queued' }, 202);
   });
 
-  routes.get('/:id/status', async (c) => {
+  routes.get('/:id/status', requireScope('sources:read'), async (c) => {
     const db = c.get('db');
     const workspaceId = c.get('workspaceId');
-    const sourceId = c.req.param('id');
+    const sourceId = sourceIdParam(c.req.param('id'));
     await getSourceForWorkspace(db, workspaceId, sourceId);
 
     const status = await getSourceStatus(db, sourceId);
@@ -197,4 +198,11 @@ export function sourceRoutes(deps: AppBindings) {
   });
 
   return routes;
+}
+
+function sourceIdParam(value: string | undefined): string {
+  if (!value) {
+    throw GatewayError.validation('Missing source id');
+  }
+  return value;
 }

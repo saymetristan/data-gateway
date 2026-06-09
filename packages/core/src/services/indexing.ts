@@ -21,12 +21,13 @@ import {
 import type { MappingDocument } from '../schemas/mapping.js';
 import type { EmbeddingProvider } from '../providers/embeddings.js';
 import type { LlmProvider } from '../providers/llm.js';
-import { promptHash } from '../utils/hash.js';
+import { payloadHash, promptHash } from '../utils/hash.js';
 import { enqueueJob } from '../queue/boss.js';
 import { EMBEDDINGS_GENERATE_JOB } from '../queue/jobs.js';
 import { getActiveMapping, getMappingByVersion } from './mappings.js';
 
 const EMBEDDING_BATCH_SIZE = 50;
+const RAW_BATCH_SIZE = 500;
 
 export async function indexSource(
   db: Database,
@@ -42,80 +43,94 @@ export async function indexSource(
 
   const mapping = await getActiveMapping(db, sourceId);
   const document = mapping.document as MappingDocument;
-  const rawRows = await db
-    .select()
-    .from(sourceRecordsRaw)
-    .where(eq(sourceRecordsRaw.sourceId, sourceId));
-
   let indexed = 0;
   const recordIdsForEmbedding: string[] = [];
+  let offset = 0;
 
-  for (const raw of rawRows) {
-    const payload = raw.payload as Record<string, unknown>;
-    const { table, externalId } = parseSourceRecordParts(raw.sourceRecordId);
-    const tableName =
-      typeof payload.__table === 'string' ? payload.__table : table;
-    const entityDef = findEntityForTable(document.entities, tableName);
-    if (!entityDef) continue;
+  for (;;) {
+    const rawRows = await db
+      .select()
+      .from(sourceRecordsRaw)
+      .where(eq(sourceRecordsRaw.sourceId, sourceId))
+      .limit(RAW_BATCH_SIZE)
+      .offset(offset);
+    if (rawRows.length === 0) break;
 
-    let data = applyFieldMapping(payload, entityDef.fields);
-    data = applyRules(data, payload, entityDef.rules);
+    for (const raw of rawRows) {
+      const payload = raw.payload as Record<string, unknown>;
+      const { table, externalId } = parseSourceRecordParts(raw.sourceRecordId);
+      const tableName =
+        typeof payload.__table === 'string' ? payload.__table : table;
+      const entityDef = findEntityForTable(document.entities, tableName);
+      if (!entityDef) continue;
 
-    if (entityDef.enrichment) {
-      data = await enrichRecord(db, sourceId, raw.sourceRecordId, raw.payloadHash, data, entityDef, llmProvider);
-    }
+      let data = applyFieldMapping(payload, entityDef.fields);
+      data = applyRules(data, payload, entityDef.rules);
 
-    const searchSource = buildSearchSource(data, entityDef.fields);
+      if (entityDef.enrichment) {
+        data = await enrichRecord(db, sourceId, raw.sourceRecordId, raw.payloadHash, data, entityDef, llmProvider);
+      }
 
-    const [existing] = await db
-      .select({
-        id: records.id,
-        mappingVersion: records.mappingVersion,
-        searchSource: records.searchSource,
-      })
-      .from(records)
-      .where(
-        and(
-          eq(records.sourceId, sourceId),
-          eq(records.entity, entityDef.entity),
-          eq(records.externalId, externalId),
-        ),
-      )
-      .limit(1);
+      const searchSource = buildSearchSource(data, entityDef.fields);
+      const dataHash = payloadHash(data);
 
-    const [upserted] = await db
-      .insert(records)
-      .values({
-        workspaceId,
-        sourceId,
-        entity: entityDef.entity,
-        externalId,
-        data,
-        mappingVersion: mapping.version,
-        searchSource,
-      })
-      .onConflictDoUpdate({
-        target: [records.sourceId, records.entity, records.externalId],
-        set: {
+      const [existing] = await db
+        .select({
+          id: records.id,
+          mappingVersion: records.mappingVersion,
+          searchSource: records.searchSource,
+          sourceRecordHash: records.sourceRecordHash,
+        })
+        .from(records)
+        .where(
+          and(
+            eq(records.sourceId, sourceId),
+            eq(records.entity, entityDef.entity),
+            eq(records.externalId, externalId),
+          ),
+        )
+        .limit(1);
+
+      const [upserted] = await db
+        .insert(records)
+        .values({
+          workspaceId,
+          sourceId,
+          entity: entityDef.entity,
+          externalId,
           data,
+          sourceRecordHash: dataHash,
           mappingVersion: mapping.version,
           searchSource,
-          updatedAt: new Date(),
-        },
-      })
-      .returning({ id: records.id, mappingVersion: records.mappingVersion, searchSource: records.searchSource });
+        })
+        .onConflictDoUpdate({
+          target: [records.sourceId, records.entity, records.externalId],
+          set: {
+            data,
+            sourceRecordHash: dataHash,
+            mappingVersion: mapping.version,
+            searchSource,
+            updatedAt: new Date(),
+          },
+        })
+        .returning({ id: records.id, mappingVersion: records.mappingVersion, searchSource: records.searchSource });
 
-    if (!upserted) continue;
+      if (!upserted) continue;
 
-    const shouldEmbed =
-      !existing ||
-      existing.mappingVersion !== mapping.version ||
-      existing.searchSource !== searchSource;
+      const shouldEmbed =
+        !existing ||
+        existing.mappingVersion !== mapping.version ||
+        existing.searchSource !== searchSource ||
+        existing.sourceRecordHash !== dataHash;
 
-    if (shouldEmbed) {
-      recordIdsForEmbedding.push(upserted.id);
-      indexed += 1;
+      if (shouldEmbed) {
+        recordIdsForEmbedding.push(upserted.id);
+        indexed += 1;
+      }
     }
+
+    if (rawRows.length < RAW_BATCH_SIZE) break;
+    offset += rawRows.length;
   }
 
   for (let i = 0; i < recordIdsForEmbedding.length; i += EMBEDDING_BATCH_SIZE) {
@@ -157,7 +172,7 @@ export async function generateEmbeddingsForRecords(
   const rows = await db
     .select()
     .from(records)
-    .where(inArray(records.id, recordIds));
+    .where(and(eq(records.sourceId, sourceId), inArray(records.id, recordIds)));
 
   const texts: string[] = [];
   const targets: typeof rows = [];

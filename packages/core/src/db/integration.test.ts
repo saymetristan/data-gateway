@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import {
   createWorkspace,
   createApiKeyForWorkspace,
-  createSource,
+  createSourceUnsafeForTests,
   records,
 } from '../index.js';
 import { withTestDatabase } from '../test/db-helper.js';
@@ -18,7 +18,7 @@ describe.runIf(hasDatabase)('database integration', () => {
         slug: 'test-unaccent',
       });
 
-      const sourceRow = await createSource(db, workspace.id, {
+      const sourceRow = await createSourceUnsafeForTests(db, workspace.id, {
         type: 'csv',
         name: 'Catalog',
         config: {},
@@ -35,6 +35,7 @@ describe.runIf(hasDatabase)('database integration', () => {
         },
         mappingVersion: 1,
         searchSource: 'Telár premium Tela resistente',
+        sourceRecordHash: 'manual-test-hash',
       });
 
       const [inserted] = await db.select().from(records).limit(1);
@@ -55,7 +56,7 @@ describe.runIf(hasDatabase)('database integration', () => {
       const { key: keyA } = await createApiKeyForWorkspace(db, wsA.id, {});
       const { key: keyB } = await createApiKeyForWorkspace(db, wsB.id, {});
 
-      const sourceA = await createSource(db, wsA.id, {
+      const sourceA = await createSourceUnsafeForTests(db, wsA.id, {
         type: 'csv',
         name: 'Source A',
         config: {},

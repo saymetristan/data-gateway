@@ -1,9 +1,17 @@
 import { z } from 'zod';
 
+const encryptionKeySchema = z.string().refine((value) => {
+  try {
+    return Buffer.from(value, 'base64').length === 32;
+  } catch {
+    return false;
+  }
+}, 'must be base64-encoded 32 bytes');
+
 export const workerEnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  CREDENTIALS_ENCRYPTION_KEY: z.string().min(1),
+  CREDENTIALS_ENCRYPTION_KEY: encryptionKeySchema,
   OPENROUTER_API_KEY: z.string().optional(),
   EMBEDDING_MODEL: z.string().default('qwen/qwen3-embedding-8b'),
   EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(1024),

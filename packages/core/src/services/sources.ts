@@ -1,14 +1,12 @@
-import { eq, and } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
-import { sources } from '../db/schema/index.js';
+import { sourceRecordsRaw, sources } from '../db/schema/index.js';
 import { decryptSourceConfig, encryptSourceConfig } from '../crypto/credentials.js';
 import { createDatabaseConnector } from '../connectors/factory.js';
 import { GatewayError } from '../errors/gateway-error.js';
 import type { CreateSourceInput } from '../schemas/index.js';
 import { enqueueJob } from '../queue/boss.js';
 import { SOURCE_SYNC_JOB } from '../queue/jobs.js';
-
-type SyncState = Record<string, { cursorColumn?: string; cursorValue?: string }>;
 
 export async function createSourceWithValidation(
   db: Database,
@@ -59,11 +57,16 @@ export async function createSourceWithValidation(
   }
 
   if (input.type === 'database_url') {
-    await enqueueJob(connectionString, SOURCE_SYNC_JOB, {
-      sourceId: source.id,
-      workspaceId,
-      fullSync: true,
-    });
+    try {
+      await enqueueJob(connectionString, SOURCE_SYNC_JOB, {
+        sourceId: source.id,
+        workspaceId,
+        fullSync: true,
+      });
+    } catch (error) {
+      await db.delete(sources).where(eq(sources.id, source.id));
+      throw error;
+    }
   }
 
   return source;
@@ -86,14 +89,16 @@ export async function getSourceStatus(db: Database, sourceId: string) {
     throw GatewayError.notFound('Source not found');
   }
 
-  const config = (source.config ?? {}) as Record<string, unknown>;
-  const syncState = (config.syncState ?? {}) as SyncState;
+  const [rawCount] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(sourceRecordsRaw)
+    .where(eq(sourceRecordsRaw.sourceId, sourceId));
 
   return {
     sourceId: source.id,
     maturityStatus: source.maturityStatus,
     lastSyncedAt: source.lastSyncedAt?.toISOString() ?? null,
-    syncState,
+    rawRecords: rawCount?.count ?? 0,
   };
 }
 

@@ -12,6 +12,7 @@ export type AppVariables = {
   db: Database;
   workspaceId: string;
   apiKeyId: string;
+  apiKeyScopes: string[];
 };
 
 export type AppBindings = {

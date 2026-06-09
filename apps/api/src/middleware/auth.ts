@@ -29,6 +29,18 @@ export function workspaceAuth() {
 
     c.set('workspaceId', apiKey.workspaceId);
     c.set('apiKeyId', apiKey.id);
+    c.set('apiKeyScopes', apiKey.scopes);
+
+    await next();
+  };
+}
+
+export function requireScope(scope: string) {
+  return async (c: Context<{ Variables: AppVariables }>, next: Next) => {
+    const scopes = c.get('apiKeyScopes');
+    if (scopes.length > 0 && !scopes.includes(scope) && !scopes.includes('*')) {
+      throw GatewayError.unauthorized(`Missing required scope: ${scope}`);
+    }
 
     await next();
   };

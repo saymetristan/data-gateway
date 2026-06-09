@@ -13,6 +13,8 @@ pnpm test
 
 Fixture ecommerce: `postgresql://readonly_user:readonly_pass@localhost:5433/catalog` (~300 productos).
 
+Para tests locales sin OpenRouter: `USE_MOCK_PROVIDERS=true`. El profiling usa una muestra máxima de 10k raw rows por fuente para evitar consumo excesivo de memoria.
+
 ## Onboarding de una fuente database URL
 
 Permisos mínimos en la DB del cliente: usuario **SELECT-only** (sin INSERT/UPDATE/DELETE).

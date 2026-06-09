@@ -5,6 +5,8 @@ import { GatewayError } from '../errors/gateway-error.js';
 import type { ProfileColumn, SourceProfileDocument } from '../schemas/profile.js';
 import { toScalarString } from '../utils/scalar.js';
 
+const MAX_PROFILE_ROWS_PER_SOURCE = 10_000;
+
 export async function profileSource(db: Database, sourceId: string): Promise<SourceProfileDocument> {
   const [source] = await db.select().from(sources).where(eq(sources.id, sourceId)).limit(1);
   if (!source) {
@@ -14,7 +16,8 @@ export async function profileSource(db: Database, sourceId: string): Promise<Sou
   const rawRows = await db
     .select()
     .from(sourceRecordsRaw)
-    .where(eq(sourceRecordsRaw.sourceId, sourceId));
+    .where(eq(sourceRecordsRaw.sourceId, sourceId))
+    .limit(MAX_PROFILE_ROWS_PER_SOURCE);
 
   const tables = new Map<string, Record<string, unknown>[]>();
   for (const row of rawRows) {

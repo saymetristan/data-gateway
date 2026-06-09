@@ -1,0 +1,1 @@
+ALTER TABLE "records" ADD COLUMN "source_record_hash" text DEFAULT '' NOT NULL;
