@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { runMigrations } from '../db/migrate.js';
 import { createDb, closeDb, type Database } from '../db/client.js';
+import { closeQueue } from '../queue/boss.js';
 
 export const DEFAULT_TEST_DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/data_gateway';
@@ -26,6 +27,7 @@ export async function withTestDatabase<T>(
   try {
     return await fn(db, testUrl);
   } finally {
+    await closeQueue().catch(() => undefined);
     await closeDb();
     const dropPool = new pg.Pool({ connectionString: adminUrl });
     try {

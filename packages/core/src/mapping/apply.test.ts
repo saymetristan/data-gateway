@@ -1,0 +1,49 @@
+import { describe, it, expect } from 'vitest';
+import {
+  applyFieldMapping,
+  applyRules,
+  buildSearchSource,
+  renderTemplate,
+} from './apply.js';
+
+describe('mapping apply', () => {
+  it('maps fields and applies rules', () => {
+    const payload = { name: 'Camiseta', stock: 5, price: '19.99' };
+    const fields = [
+      {
+        name: 'name',
+        sourceColumn: 'name',
+        type: 'string' as const,
+        searchable: true,
+        filterable: false,
+        visible: true,
+        sensitive: false,
+      },
+      {
+        name: 'stock',
+        sourceColumn: 'stock',
+        type: 'number' as const,
+        searchable: false,
+        filterable: true,
+        visible: true,
+        sensitive: false,
+      },
+    ];
+
+    const data = applyFieldMapping(payload, fields);
+    const withRules = applyRules(data, payload, [
+      { field: 'available', op: 'gt', column: 'stock', value: 0 },
+    ]);
+
+    expect(withRules.available).toBe(true);
+    expect(buildSearchSource(withRules, fields)).toBe('Camiseta');
+  });
+
+  it('renders embedding template', () => {
+    const text = renderTemplate('{{name}} - {{sku}}', { name: 'A', sku: 'SKU-1' }, [
+      'name',
+      'sku',
+    ]);
+    expect(text).toBe('A - SKU-1');
+  });
+});

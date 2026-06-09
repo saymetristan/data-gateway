@@ -2,6 +2,7 @@ export type GatewayErrorCode =
   | 'unauthorized'
   | 'not_found'
   | 'validation_error'
+  | 'unprocessable_entity'
   | 'conflict'
   | 'internal';
 
@@ -9,6 +10,7 @@ const HTTP_STATUS = {
   unauthorized: 401,
   not_found: 404,
   validation_error: 400,
+  unprocessable_entity: 422,
   conflict: 409,
   internal: 500,
 } as const;
@@ -40,6 +42,10 @@ export class GatewayError extends Error {
 
   static validation(message: string, details?: unknown): GatewayError {
     return new GatewayError('validation_error', message, details);
+  }
+
+  static unprocessable(message: string, details?: unknown): GatewayError {
+    return new GatewayError('unprocessable_entity', message, details);
   }
 
   static conflict(message: string): GatewayError {

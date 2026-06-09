@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { createDb, closeDb, getPool } from './client.js';
 
-const packageRoot = path.resolve(__dirname, '..', '..');
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const EXTENSIONS_SQL = readFileSync(
   path.join(packageRoot, 'src/db/sql/extensions.sql'),
   'utf8',

@@ -69,33 +69,24 @@ El workspace ya quedó configurado vía `project-setup` + yuntro; nada de esto s
 - [x] Tests unit + integration (13 tests)
 - [x] STOP — revisión humana antes de fase 2
 
-### Fase 2: Ingesta e indexación (conector database URL como fuente inicial)
+### Fase 2: Ingesta e indexación (conector database URL como fuente inicial) — COMPLETADA
 
-- Conector por database URL (Postgres, MySQL y Supabase; Supabase es Postgres, solo cambia la documentación de onboarding)
-  - Validación de conexión read-only al crear la fuente; documentar permisos mínimos requeridos (usuario SELECT-only)
-  - Credenciales cifradas en reposo (nunca en texto plano en `sources.config`)
-  - Introspección de schema: tablas, columnas, tipos, PKs, FKs (vía `information_schema`, abstracción común para ambos motores)
-  - Selección de tablas a sincronizar por fuente
-  - Sync a `source_records_raw`: incremental por columna cursor (`updated_at` o equivalente) cuando exista, fallback a full sync programado; detección de cambios por hash del payload para idempotencia y para no reprocesar registros sin cambios
-- Conector CSV (upload) como secundario, mismo pipeline de raw → profiling → mapping
-- Profiling básico de la fuente
-  - Detección de columnas, tipos inferidos, cardinalidad, nulos, valores frecuentes (top-N por columna)
-  - Persistir perfil; expone `GET /sources/:id/profile`
-- Formato de mapping (YAML/JSON validado con Zod, escrito a mano en esta fase)
-  - Entidad, campos con flags, mapeo columna→campo, reglas (`available = stock > 0`), default filters
-  - **Embedding text template** por entidad: qué campos y en qué formato se concatenan para el embedding
-  - `POST /sources/:id/mapping` con validación contra el perfil (columnas existentes, tipos compatibles)
-- Pipeline de enriquecimiento (worker)
-  - Paso opcional por entidad definido en el mapping: LLM genera atributos semánticos desde descripciones una sola vez en ingest; se guardan en `data` como campos más
-  - Cache/idempotencia: no re-enriquecer registros sin cambios (hash del payload)
-- Pipeline de indexación (worker)
-  - raw → aplicar mapping → upsert en `records` → generar `search_text` → encolar embeddings
-  - Worker de embeddings con batching y registro de `embedding_model` + dims + `mapping_version`
-  - `POST /sources/:id/index` y estado de indexación consultable
-- Fixture de desarrollo: base Postgres seedeada en Docker Compose (catálogo ecommerce realista, ~300 registros) conectada vía database URL; valida el slice completo end-to-end (introspección → raw → records → embeddings)
-- Tests: introspección de schema, sync incremental por cursor y fallback full, idempotencia por hash, aplicación de mapping, generación de search_text, encolado de embeddings (con proveedor de embeddings mockeado)
-- Realizar auto-revisión del código; marcar como hecho solo cuando la fase cumpla el 100% de los requisitos
-- STOP y esperar revisión humana
+- [x] Conector database URL (Postgres + MySQL; Supabase = Postgres)
+  - [x] Validación read-only al crear fuente (422 si tiene write)
+  - [x] Credenciales cifradas AES-256-GCM (`enc:v1:...`)
+  - [x] Introspección schema (information_schema + pg_catalog para PKs)
+  - [x] Sync incremental por cursor + full sync; hash idempotente en raw
+- [x] Conector CSV (`POST /sources/:id/upload`)
+- [x] Profiling sobre raw + `GET /sources/:id/profile` + tabla `source_profiles`
+- [x] Mapping Zod (`POST /sources/:id/mapping`) con validación contra perfil, versionado
+- [x] Enriquecimiento LLM opcional en ingest + cache `record_enrichments`
+- [x] Index pipeline: `source.index` + `embeddings.generate` (OpenRouter + mocks)
+  - [x] `records.search_source` → `search_text` generado
+  - [x] unique `(record_id, embedding_model, mapping_version)`
+- [x] `POST /sources/:id/sync|index`, `GET /sources/:id/status`
+- [x] Fixture ecommerce en docker-compose (`fixture-db:5433`, 300 productos, `readonly_user`)
+- [x] Tests: 25 passing (unit + integration e2e con fixture)
+- [x] STOP — revisión humana antes de fase 3
 
 ### Fase 3: Query engine (búsqueda híbrida + API de consulta)
 

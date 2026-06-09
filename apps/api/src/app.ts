@@ -48,7 +48,7 @@ export function createApp(deps: AppBindings) {
 
   app.use('/sources', workspaceAuth());
   app.use('/sources/*', workspaceAuth());
-  app.route('/sources', sourceRoutes());
+  app.route('/sources', sourceRoutes(deps));
 
   return app;
 }

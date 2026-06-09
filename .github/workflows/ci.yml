@@ -23,10 +23,26 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      fixture-db:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: catalog
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d catalog"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/data_gateway
+      FIXTURE_DATABASE_URL: postgresql://readonly_user:readonly_pass@localhost:5433/catalog
       ADMIN_API_KEY: dgw_admin_ci_test_key_1234567890
+      CREDENTIALS_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      USE_MOCK_PROVIDERS: 'true'
       CI: 'true'
       RUN_INTEGRATION_TESTS: 'true'
 
@@ -44,6 +60,12 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Seed fixture database
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d catalog -f fixtures/ecommerce-seed.sql
 
       - name: Build
         run: pnpm build

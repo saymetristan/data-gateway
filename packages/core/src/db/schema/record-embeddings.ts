@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { vector1024 } from '../custom-types.js';
 import { records } from './records.js';
 
@@ -18,6 +18,11 @@ export const recordEmbeddings = pgTable(
   },
   (table) => [
     index('record_embeddings_record_id_idx').on(table.recordId),
+    uniqueIndex('record_embeddings_record_model_version_unique').on(
+      table.recordId,
+      table.embeddingModel,
+      table.mappingVersion,
+    ),
     index('record_embeddings_embedding_hnsw_idx').using(
       'hnsw',
       table.embedding.op('vector_cosine_ops'),

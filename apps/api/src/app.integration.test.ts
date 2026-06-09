@@ -7,6 +7,11 @@ import type { ApiEnv } from './env.js';
 const hasDatabase = process.env.RUN_INTEGRATION_TESTS === 'true' || process.env.CI === 'true';
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/data_gateway';
+const ENCRYPTION_KEY =
+  process.env.CREDENTIALS_ENCRYPTION_KEY ?? Buffer.alloc(32, 7).toString('base64');
+const FIXTURE_URL =
+  process.env.FIXTURE_DATABASE_URL ??
+  'postgresql://readonly_user:readonly_pass@localhost:5433/catalog';
 
 describe.runIf(hasDatabase)('API integration', () => {
   const adminKey = 'dgw_admin_test_key_1234567890';
@@ -20,6 +25,7 @@ describe.runIf(hasDatabase)('API integration', () => {
       DATABASE_URL,
       PORT: 3000,
       ADMIN_API_KEY: adminKey,
+      CREDENTIALS_ENCRYPTION_KEY: ENCRYPTION_KEY,
       NODE_ENV: 'test',
     };
     app = createApp({ env, db });
@@ -60,9 +66,9 @@ describe.runIf(hasDatabase)('API integration', () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        type: 'database_url',
-        name: 'External',
-        config: { connectionUrl: 'postgresql://readonly:pass@localhost:5432/catalog' },
+        type: 'csv',
+        name: 'Catalog CSV',
+        config: {},
       }),
     });
     expect(sourceRes.status).toBe(201);

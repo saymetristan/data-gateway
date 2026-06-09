@@ -4,6 +4,7 @@ export const apiEnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   PORT: z.coerce.number().int().positive().default(3000),
   ADMIN_API_KEY: z.string().min(16),
+  CREDENTIALS_ENCRYPTION_KEY: z.string().min(1),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
 

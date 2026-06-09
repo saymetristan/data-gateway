@@ -20,8 +20,11 @@
     "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
+    "csv-parse": "^5.6.0",
     "drizzle-orm": "^0.44.2",
+    "mysql2": "^3.14.1",
     "pg": "^8.16.0",
+    "pg-boss": "^10.2.0",
     "zod": "^3.25.51"
   },
   "devDependencies": {

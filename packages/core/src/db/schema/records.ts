@@ -27,13 +27,9 @@ export const records = pgTable(
     externalId: text('external_id').notNull(),
     data: jsonb('data').notNull().default({}),
     mappingVersion: integer('mapping_version').notNull().default(0),
+    searchSource: text('search_source').notNull().default(''),
     searchText: tsvector('search_text').generatedAlwaysAs(
-      sql`to_tsvector('es_unaccent', public.f_unaccent(
-        coalesce(data->>'name', '') || ' ' ||
-        coalesce(data->>'description', '') || ' ' ||
-        coalesce(data->>'title', '') || ' ' ||
-        coalesce(data->>'sku', '')
-      ))`,
+      sql`to_tsvector('es_unaccent', public.f_unaccent(coalesce(search_source, '')))`,
     ),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

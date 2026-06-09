@@ -34,6 +34,7 @@ describe.runIf(hasDatabase)('database integration', () => {
           description: 'Tela resistente',
         },
         mappingVersion: 1,
+        searchSource: 'Telár premium Tela resistente',
       });
 
       const [inserted] = await db.select().from(records).limit(1);

@@ -1,6 +1,6 @@
 import PgBoss from 'pg-boss';
 import { loadWorkerEnv } from './env.js';
-import { registerJobs, scheduleJobs } from './jobs/health.js';
+import { registerJobs, scheduleJobs } from './jobs/index.js';
 
 const env = loadWorkerEnv();
 
@@ -17,7 +17,7 @@ async function start(): Promise<void> {
   });
 
   await boss.start();
-  registerJobs(boss);
+  registerJobs(boss, env);
   await scheduleJobs(boss);
   console.log('Worker started (pg-boss schema: pgboss)');
 }
