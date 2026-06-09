@@ -1,0 +1,23 @@
+<!-- Generated from .agent/operating-model.yaml. Edit source config instead. -->
+
+---
+description: Route work through project workflows
+globs: **/*
+---
+
+# Tsuzuro Data Gateway Workflow Routing
+
+## Feature Cycle
+- Use when: User asks to implement a feature, bug fix or API-adjacent change.
+- Stop: Public API lacks contract.
+- Stop: Product boundary is unclear.
+- Stop: Security, database or platform scope appears without routing to dedicated workflow.
+- Stop: Production promotion is requested.
+
+## Platform Change
+- Use when: User changes CI/CD, MCP, cloud providers, DNS, variables or deploy configuration.
+- Stop: No plan for platform mutation.
+- Stop: Token scope is too broad.
+- Stop: Production is touched without human gate.
+- Stop: Destructive provider action lacks rollback and confirm.
+

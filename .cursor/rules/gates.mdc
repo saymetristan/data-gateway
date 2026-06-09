@@ -1,0 +1,72 @@
+<!-- Generated from .agent/operating-model.yaml. Edit source config instead. -->
+
+---
+description: Required project gates
+globs: **/*
+---
+
+# Tsuzuro Data Gateway Gates
+
+## Product Boundary
+The change must stay inside documented product scope.
+- Applies to: F, P, DB, S, Plat
+- Enforced by: docs, runtime-rule
+- Evidence:
+- Boundary doc reviewed or owner decision recorded.
+
+## API Contract
+Public surfaces must update schemas and generated docs.
+- Applies to: P
+- Enforced by: docs, ci
+- Evidence:
+- OpenAPI/schema updated.
+- Contract tests passed.
+
+## DB Migration
+Persistent data changes need safe migration strategy.
+- Applies to: DB
+- Enforced by: docs, ci, human
+- Evidence:
+- Migration is reviewable.
+- Rollback or forward-fix documented.
+- Disposable DB tests passed.
+
+## Security
+Sensitive changes need explicit secret and scope review.
+- Applies to: S, DB, Plat
+- Enforced by: hook, ci, human
+- Evidence:
+- No secrets exposed.
+- Required isolation/scope tests passed.
+
+## Testing
+Relevant deterministic checks must pass.
+- Applies to: F, P, DB, S, Plat
+- Enforced by: ci
+- Evidence:
+- lint/typecheck/test/build results reported.
+
+## PR CI Main
+High-risk changes require branch, PR and green CI before merge; docs, features and DB changes may land on main with local checks green.
+- Applies to: P, S, Plat
+- Enforced by: branch-protection, ci, runtime-rule
+- Evidence:
+- Branch, PR, CI and merge status reported.
+
+## Deploy
+Runtime changes need post-deploy verification (healthcheck, logs, jobs).
+- Applies to: P, S, Plat
+- Enforced by: ci, provider, human
+- Evidence:
+- Staging deploy status.
+- Smoke/log/error check.
+
+## Production
+Production writes or promotions require protected human gate.
+- Applies to: I, Plat, S
+- Enforced by: human, provider, hook
+- Evidence:
+- Human approval.
+- Rollback notes.
+- Production action result.
+

@@ -1,0 +1,21 @@
+<!-- Generated from .agent/operating-model.yaml. Edit source config instead. -->
+
+---
+alwaysApply: true
+---
+
+# Tsuzuro Data Gateway Core Rules
+
+- Classify every task before editing.
+- Use the workflow catalog for implementation, database, security, platform and incident work.
+- Stop when product boundaries, public contracts, DB state, secrets, provider writes or production are ambiguous.
+- Never hand-edit generated files; update `.agent/operating-model.yaml` and regenerate.
+- Close with checks, branch/PR/CI state, docs/change-record status, deploy status and residual risks.
+
+## Product Boundaries
+- No free-form SQL: LLM output is a structured representation only; the backend compiles parameterized queries.
+- Fields flagged sensitive or visible:false never leave the Gateway in any response or exposed log.
+- External client DB connections are read-only; credentials encrypted at rest.
+- The query path must work without LLM; LLM is fallback for slot-filling only.
+- Production DB operations go through the data-gateway-supabase MCP, never local CLI.
+- Never commit .env, .cursor/mcp.json or client credentials.

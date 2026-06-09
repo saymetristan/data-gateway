@@ -1,0 +1,36 @@
+{
+  "enabled": true,
+  "policy": ".cursor/hooks/policy.generated.json",
+  "hooks": [
+    {
+      "event": "beforeShellExecution",
+      "action": "guard-shell",
+      "command": "node .cursor/hooks/guard-shell.mjs",
+      "failClosed": true
+    },
+    {
+      "event": "beforeMCPExecution",
+      "action": "guard-mcp",
+      "command": "node .cursor/hooks/guard-mcp.mjs",
+      "failClosed": true
+    },
+    {
+      "event": "beforeReadFile",
+      "action": "guard-secret-read",
+      "command": "node .cursor/hooks/guard-secret-read.mjs",
+      "failClosed": true
+    },
+    {
+      "event": "afterFileEdit",
+      "action": "audit-edit",
+      "command": "node .cursor/hooks/audit-edit.mjs",
+      "failClosed": false
+    },
+    {
+      "event": "stop",
+      "action": "closeout-reminder",
+      "command": "node .cursor/hooks/closeout-reminder.mjs",
+      "failClosed": false
+    }
+  ]
+}

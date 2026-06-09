@@ -1,0 +1,382 @@
+version: 1
+project:
+  id: data-gateway
+  name: Tsuzuro Data Gateway
+  repository: saymetristan/data-gateway
+  defaultBranch: main
+  languagePolicy:
+    publicDocs: Project default
+    codeIdentifiers: English
+  boundaries:
+    - "No free-form SQL: LLM output is a structured representation only; the backend compiles parameterized queries."
+    - "Fields flagged sensitive or visible:false never leave the Gateway in any response or exposed log."
+    - External client DB connections are read-only; credentials encrypted at rest.
+    - The query path must work without LLM; LLM is fallback for slot-filling only.
+    - Production DB operations go through the data-gateway-supabase MCP, never local CLI.
+    - Never commit .env, .cursor/mcp.json or client credentials.
+stack:
+  languages:
+    - TypeScript
+  frameworks:
+    - Hono
+    - Drizzle
+    - pg-boss
+    - Vitest
+  apps:
+    - name: api
+      path: apps/api
+    - name: worker
+      path: apps/worker
+  packages:
+    - name: core
+      path: packages/core
+    - name: mcp-server
+      path: packages/mcp-server
+  commands:
+    dev:
+      run: pnpm dev
+    test:
+      run: pnpm test
+    lint:
+      run: pnpm lint
+    typecheck:
+      run: pnpm typecheck
+    build:
+      run: pnpm build
+changeTypes:
+  - id: D
+    name: Documentation
+    description: Docs-only change without runtime behaviour.
+  - id: F
+    name: Feature
+    description: Normal app feature or fix.
+  - id: P
+    name: Public Surface
+    description: API, SDK, CLI, event or public contract change.
+    planRequired: true
+  - id: DB
+    name: Database
+    description: Schema, migration, index, backfill or persistent query change.
+    planRequired: true
+  - id: S
+    name: Security
+    description: Auth, tenancy, secrets, permissions or sensitive controls.
+    planRequired: true
+    protected: true
+  - id: I
+    name: Incident
+    description: Production incident, rollback or hotfix.
+    protected: true
+  - id: Plat
+    name: Platform
+    description: CI/CD, deploy, provider, MCP, DNS or environment change.
+    planRequired: true
+    protected: true
+gates:
+  - id: product-boundary
+    name: Product Boundary
+    description: The change must stay inside documented product scope.
+    appliesTo:
+      - F
+      - P
+      - DB
+      - S
+      - Plat
+    enforcedBy:
+      - docs
+      - runtime-rule
+    evidence:
+      - Boundary doc reviewed or owner decision recorded.
+  - id: api-contract
+    name: API Contract
+    description: Public surfaces must update schemas and generated docs.
+    appliesTo:
+      - P
+    enforcedBy:
+      - docs
+      - ci
+    evidence:
+      - OpenAPI/schema updated.
+      - Contract tests passed.
+  - id: db-migration
+    name: DB Migration
+    description: Persistent data changes need safe migration strategy.
+    appliesTo:
+      - DB
+    enforcedBy:
+      - docs
+      - ci
+      - human
+    evidence:
+      - Migration is reviewable.
+      - Rollback or forward-fix documented.
+      - Disposable DB tests passed.
+  - id: security
+    name: Security
+    description: Sensitive changes need explicit secret and scope review.
+    appliesTo:
+      - S
+      - DB
+      - Plat
+    enforcedBy:
+      - hook
+      - ci
+      - human
+    evidence:
+      - No secrets exposed.
+      - Required isolation/scope tests passed.
+  - id: testing
+    name: Testing
+    description: Relevant deterministic checks must pass.
+    appliesTo:
+      - F
+      - P
+      - DB
+      - S
+      - Plat
+    enforcedBy:
+      - ci
+    evidence:
+      - lint/typecheck/test/build results reported.
+  - id: pr-ci-main
+    name: PR CI Main
+    description: High-risk changes require branch, PR and green CI before merge; docs, features and DB changes may land on main with local checks green.
+    appliesTo:
+      - P
+      - S
+      - Plat
+    enforcedBy:
+      - branch-protection
+      - ci
+      - runtime-rule
+    evidence:
+      - Branch, PR, CI and merge status reported.
+  - id: deploy
+    name: Deploy
+    description: Runtime changes need post-deploy verification (healthcheck, logs, jobs).
+    appliesTo:
+      - P
+      - S
+      - Plat
+    enforcedBy:
+      - ci
+      - provider
+      - human
+    evidence:
+      - Staging deploy status.
+      - Smoke/log/error check.
+  - id: production
+    name: Production
+    description: Production writes or promotions require protected human gate.
+    appliesTo:
+      - I
+      - Plat
+      - S
+    enforcedBy:
+      - human
+      - provider
+      - hook
+    evidence:
+      - Human approval.
+      - Rollback notes.
+      - Production action result.
+workflows:
+  - id: feature-cycle
+    name: Feature Cycle
+    description: Normal implementation workflow for features and fixes.
+    changeTypes:
+      - F
+      - P
+    skill:
+      name: feature-cycle
+      description: Execute feature work from classification through implementation, tests, docs and closeout.
+      status: project
+    useWhen:
+      - User asks to implement a feature, bug fix or API-adjacent change.
+    requiredInputs:
+      - Goal and observable done condition.
+      - Change type and affected domain.
+      - Public contract reference when type is P.
+    outputs:
+      - Cohesive implementation.
+      - Focused tests.
+      - Updated contracts/docs when needed.
+      - PR/CI/change-record evidence.
+    gates:
+      - product-boundary
+      - api-contract
+      - testing
+      - pr-ci-main
+      - deploy
+    tools:
+      - git
+      - github
+      - local-checks
+    stopConditions:
+      - Public API lacks contract.
+      - Product boundary is unclear.
+      - Security, database or platform scope appears without routing to dedicated workflow.
+      - Production promotion is requested.
+    closeout:
+      - Report change type and gates.
+      - Report checks run.
+      - Report branch, PR, CI and merge state.
+      - Report deploy verify if runtime changed.
+      - Report change record status.
+  - id: platform-change
+    name: Platform Change
+    description: Provider, MCP, CI/CD, DNS, environment and deploy workflow.
+    changeTypes:
+      - Plat
+    skill:
+      name: platform-change
+      description: Execute platform changes with dry-run, confirmations, rollback notes and provider evidence.
+      status: draft
+    useWhen:
+      - User changes CI/CD, MCP, cloud providers, DNS, variables or deploy configuration.
+    requiredInputs:
+      - Provider, account/project and environment.
+      - Read/write/destructive scope.
+      - Rollback plan.
+      - Health-check for required provider/MCP.
+    outputs:
+      - Versioned config or provider evidence.
+      - Sanitized MCP/config templates.
+      - Health-check result.
+      - Change record.
+    gates:
+      - security
+      - testing
+      - pr-ci-main
+      - deploy
+      - production
+    tools:
+      - git
+      - github
+      - provider-mcp
+      - provider-cli-fallback
+    stopConditions:
+      - No plan for platform mutation.
+      - Token scope is too broad.
+      - Production is touched without human gate.
+      - Destructive provider action lacks rollback and confirm.
+    closeout:
+      - Report exact provider action.
+      - Report dry-run/confirm/human gate status.
+      - Report no secrets exposed.
+      - Report config templates updated.
+      - Report change record.
+providers:
+  - id: railway
+    kind: deploy
+    project: data-gateway
+    environments:
+      - production
+  - id: supabase
+    kind: database
+    project: data-ingest
+    environments:
+      - production
+mcp:
+  templatePath: .cursor/mcp.json.example
+  realConfigPolicy: gitignored
+  servers:
+    - name: data-gateway-supabase
+      provider: supabase
+      transport: stdio
+    - name: data-gateway-railway
+      provider: railway
+      transport: stdio
+hooks:
+  enabled: true
+  sensitivePaths:
+    - .env
+    - .cursor/mcp.json
+    - "**/*.pem"
+    - "**/*credentials*.json"
+  riskPatterns:
+    - id: secret-like-value
+      pattern: (token|secret|password|api[_-]?key)\s*[:=]
+      severity: warn
+      action: ask
+    - id: destructive-shell
+      pattern: rm\s+-rf\s+[~/]|git\s+push\s+--force|git\s+reset\s+--hard
+      severity: block
+      action: deny
+  profiles:
+    - id: strict
+      events:
+        - event: beforeShellExecution
+          action: guard-shell
+          failClosed: true
+        - event: beforeMCPExecution
+          action: guard-mcp
+          failClosed: true
+        - event: beforeReadFile
+          action: guard-secret-read
+          failClosed: true
+        - event: afterFileEdit
+          action: audit-edit
+          failClosed: false
+        - event: stop
+          action: closeout-reminder
+          failClosed: false
+runtimes:
+  - id: cursor
+    enabled: true
+    capabilities:
+      - rules
+      - skills
+      - commands
+      - mcp
+      - hooks
+    outputPath: .cursor
+    mode: native
+  - id: codex
+    enabled: true
+    capabilities:
+      - rules
+      - skills
+      - mcp
+    outputPath: AGENTS.md
+    mode: bridge
+  - id: claude-code
+    enabled: false
+    capabilities:
+      - rules
+      - agents
+      - skills
+      - commands
+      - mcp
+      - hooks
+    outputPath: .claude
+    mode: native
+collaboration:
+  git:
+    defaultBranch: main
+    branchPattern: "{type}/{slug}"
+    forbidForcePush: true
+  pullRequests:
+    required: false
+    template: .github/pull_request_template.md
+    requiredSections:
+      - Summary
+      - Change type and gates
+      - Test plan
+      - CI status
+      - Change record
+      - Deploy verify
+      - Risks
+  ci:
+    requiredChecks: []
+    mergeRequiresGreen: true
+  changeRecords:
+    requiredFor:
+      - S
+      - Plat
+      - I
+    pathPattern: docs/changes/{yyyy}/{mm}/{yyyy-mm-dd}-{slug}.md
+outputs:
+  docsDir: docs/engineering
+  changeRecordsDir: docs/changes
+  generatedHeader: Generated from .agent/operating-model.yaml. Edit source config instead.

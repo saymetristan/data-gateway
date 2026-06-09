@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "project": {
+    "id": "data-gateway",
+    "defaultBranch": "main"
+  },
+  "sensitivePaths": [
+    ".env",
+    ".cursor/mcp.json",
+    "**/*.pem",
+    "**/*credentials*.json"
+  ],
+  "shell": {
+    "deny": [
+      "rm\\s+-rf\\s+[~/]|git\\s+push\\s+--force|git\\s+reset\\s+--hard"
+    ],
+    "ask": [
+      "(token|secret|password|api[_-]?key)\\s*[:=]"
+    ]
+  },
+  "mcp": {
+    "readToolPattern": "^(health[-_]?check|get[-_]|list[-_]|explain[-_]|search[-_]|read[-_])",
+    "writeToolPattern": "(^|[_:\\\\s.-])(create|update|delete|purge|rotate|deploy|merge|rerun|resolve|assign|set|put|flush)(?=$|[_:\\\\s.-])|^(run_sql|apply_migration)$",
+    "sensitivePayloadPattern": "postgres(?:ql)?://|://[^/\\\\s:@]+:[^/\\\\s@]+@|(?:token|secret|password|api[_-]?key)\\\\s*[:=]|\\\\.env\\\\b",
+    "providers": {
+      "railway": {
+        "serverNames": [
+          "data-gateway-railway"
+        ],
+        "writes": {
+          "default": "dry-run",
+          "production": "human-gate",
+          "destructive": "human-gate"
+        }
+      },
+      "supabase": {
+        "serverNames": [
+          "data-gateway-supabase"
+        ],
+        "writes": {
+          "default": "dry-run",
+          "production": "human-gate",
+          "destructive": "human-gate"
+        }
+      }
+    }
+  },
+  "closeout": {
+    "requiredEvidence": [
+      "change type and workflow",
+      "scope completed",
+      "checks run and result",
+      "branch PR CI merge state",
+      "deploy verify when applicable",
+      "change record status",
+      "secret exposure status",
+      "production status",
+      "residual risks"
+    ]
+  }
+}
