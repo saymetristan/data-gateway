@@ -144,13 +144,14 @@ export async function indexSource(
     });
   }
 
+  // Re-index invalidates validated/agent_ready even when no records changed.
+  await maybeTransitionSourceMaturity(db, sourceId, 'indexed', 'source_reindexed', [
+    'validated',
+    'agent_ready',
+  ]);
+
   if (indexed > 0) {
-    await maybeTransitionSourceMaturity(db, sourceId, 'indexed', 'source_indexed', [
-      'mapped',
-      'validated',
-      'agent_ready',
-      'indexed',
-    ]);
+    await maybeTransitionSourceMaturity(db, sourceId, 'indexed', 'source_indexed', ['mapped']);
   }
 
   return {
