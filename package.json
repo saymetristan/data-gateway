@@ -1,12 +1,31 @@
 {
   "name": "data-gateway",
   "private": true,
+  "type": "module",
   "engines": {
     "node": ">=22",
     "pnpm": ">=9"
   },
   "packageManager": "pnpm@9.15.4",
   "scripts": {
+    "predev": "pnpm --filter @data-gateway/core build",
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r typecheck",
+    "db:generate": "pnpm --filter @data-gateway/core db:generate",
+    "db:migrate": "pnpm --filter @data-gateway/core db:migrate",
     "mcp:example": "jq '.mcpServers |= with_entries((.value.env // {}) as $env | .value.env = ($env | with_entries(if .key == \"SUPABASE_ACCESS_TOKEN\" then .value = \"YOUR_SUPABASE_PAT\" elif .key == \"RAILWAY_API_TOKEN\" then .value = \"YOUR_RAILWAY_ACCOUNT_TOKEN\" elif .key == \"RAILWAY_TOKEN\" then .value = \"YOUR_RAILWAY_PROJECT_TOKEN\" elif .key == \"SUPABASE_PROJECT_REF\" then . else .value = (\"YOUR_\" + .key) end)) | if .value.args then .value.args |= map(sub(\"^/Users/[^/]+/\"; \"/Users/YOUR_USER/\")) else . end)' .cursor/mcp.json > .cursor/mcp.json.example"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "@types/node": "^22.15.29",
+    "eslint": "^9.28.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.33.0",
+    "vitest": "^3.2.1"
   }
 }

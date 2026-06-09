@@ -1,0 +1,22 @@
+{
+  "name": "@data-gateway/worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@data-gateway/core": "workspace:*",
+    "pg-boss": "^10.2.0",
+    "zod": "^3.25.51"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4",
+    "vitest": "^3.2.1"
+  }
+}
