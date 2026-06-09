@@ -242,8 +242,7 @@ describe.runIf(hasFixture)('evals integration', () => {
 
       const { source } = await bootstrapIndexedSource(db, testUrl, workspace.id);
       const badSet = await createEvalSet(db, workspace.id, {
-        name: 'Bad set',
-        sourceId: source.id,
+        name: 'Bad global set',
         threshold: 0.99,
       });
       await seedEvalCasesFromFixture(db, badSet.id, [
