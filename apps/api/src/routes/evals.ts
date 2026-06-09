@@ -137,6 +137,8 @@ export function evalRoutes(deps: AppBindings) {
     const workspaceId = c.get('workspaceId');
     const runId = runIdParam(c.req.param('id'));
     const run = await getEvalRunForWorkspace(db, workspaceId, runId);
+    const stale =
+      run.status === 'running' && Date.now() - run.startedAt.getTime() > 15 * 60 * 1000;
 
     return c.json({
       id: run.id,
@@ -147,6 +149,7 @@ export function evalRoutes(deps: AppBindings) {
       failed: run.failed,
       startedAt: run.startedAt.toISOString(),
       finishedAt: run.finishedAt?.toISOString() ?? null,
+      stale,
     });
   });
 

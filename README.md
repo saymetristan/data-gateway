@@ -154,7 +154,7 @@ connected → profiled → mapped → indexed → validated → agent_ready
 - `profiled`: tras profiling
 - `mapped`: mapping activo creado
 - `indexed`: records + embeddings generados
-- `validated`: último eval run del set aplicable supera `threshold`
+- `validated`: último eval run del set aplicable supera `threshold` y no tiene leaks sensibles
 - `agent_ready`: `POST /sources/:id/activate` tras `validated`
 
 Re-index o mapping nuevo sobre `validated`/`agent_ready` regresa a `indexed`. Transiciones auditadas en `source_transitions`.
@@ -164,7 +164,7 @@ Re-index o mapping nuevo sobre `validated`/`agent_ready` regresa a `indexed`. Tr
 Scopes: `evals:read`, `evals:write` (legacy keys sin scopes = permitido).
 
 ```bash
-# Crear eval set (opcional sourceId para gate por fuente)
+# Crear eval set (opcional sourceId para gate por fuente; uno global o uno por fuente)
 curl -X POST http://localhost:3000/evals/sets \
   -H "Authorization: Bearer $WORKSPACE_API_KEY" \
   -d '{"name":"Ecommerce","sourceId":"...","threshold":0.8}'
@@ -183,7 +183,7 @@ curl -X POST http://localhost:3000/evals/run \
 curl http://localhost:3000/evals/runs/{run_id} \
   -H "Authorization: Bearer $WORKSPACE_API_KEY"
 
-# Activar fuente (requiere validated + último run >= threshold)
+# Activar fuente (requiere validated + último run >= threshold + sensitiveLeaks = 0)
 curl -X POST http://localhost:3000/sources/{source_id}/activate \
   -H "Authorization: Bearer $WORKSPACE_API_KEY"
 ```
@@ -201,7 +201,9 @@ curl -X POST http://localhost:3000/sources/{source_id}/activate \
 - `score = casesPassed / casesTotal` (gate principal)
 - `precisionAtK`: promedio de precision@k por case con `expectedExternalIds`
 - `filterAccuracy`: fracción de filtros requeridos aplicados
-- `sensitiveLeaks`: conteo de campos prohibidos en responses (debe ser 0)
+- `sensitiveLeaks`: conteo de campos prohibidos en responses (debe ser 0; bloquea `validated`/`agent_ready`)
 - `latencyMsP50` / `latencyMsP95`
+
+Si `GET /evals/runs/:id` devuelve un run `running` con `stale: true`, el worker probablemente murió o perdió el job después de tomarlo. Re-encola el run o crea uno nuevo; `runEvalSet` es idempotente y no reprocesa runs que ya no están en `running`.
 
 Fixture: `fixtures/ecommerce-evals.json` (24 cases para el catálogo de prueba).

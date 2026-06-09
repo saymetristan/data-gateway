@@ -156,6 +156,14 @@ describe.runIf(hasFixture)('evals integration', () => {
       const metrics = completed?.metrics as { score?: number };
       expect(metrics.score).toBeGreaterThanOrEqual(0.8);
 
+      await runEvalSet(
+        db,
+        run.id,
+        workspace.id,
+        new MockEmbeddingProvider(1024),
+        new MockLlmProvider(),
+      );
+
       const [updatedSource] = await db
         .select()
         .from(sources)
@@ -168,6 +176,59 @@ describe.runIf(hasFixture)('evals integration', () => {
         .from(sourceTransitions)
         .where(eq(sourceTransitions.sourceId, source.id));
       expect(transitions.some((row) => row.toStatus === 'validated')).toBe(true);
+      expect(transitions.filter((row) => row.toStatus === 'validated')).toHaveLength(1);
+    });
+  });
+
+  it('no valida ni activa fuentes cuando un eval run tiene sensitive leaks', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Leaks', slug: `leaks-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      const { source } = await bootstrapIndexedSource(db, testUrl, workspace.id);
+      const evalSet = await createEvalSet(db, workspace.id, {
+        name: 'Leaky set',
+        sourceId: source.id,
+        threshold: 0,
+      });
+      await seedEvalCasesFromFixture(db, evalSet.id, [
+        { query: 'camiseta roja', mustNotContainFields: ['sku'] },
+      ]);
+
+      const [run] = await db
+        .insert(evalRuns)
+        .values({ evalSetId: evalSet.id, status: 'running', metrics: {} })
+        .returning();
+      if (!run) throw new Error('run missing');
+
+      await runEvalSet(db, run.id, workspace.id, new MockEmbeddingProvider(1024));
+
+      const [completed] = await db
+        .select()
+        .from(evalRuns)
+        .where(eq(evalRuns.id, run.id))
+        .limit(1);
+      const metrics = completed?.metrics as { score?: number; sensitiveLeaks?: number };
+      expect(metrics.score).toBe(0);
+      expect(metrics.sensitiveLeaks).toBeGreaterThan(0);
+
+      const [updatedSource] = await db
+        .select()
+        .from(sources)
+        .where(eq(sources.id, source.id))
+        .limit(1);
+      expect(updatedSource?.maturityStatus).toBe('indexed');
+
+      await db
+        .update(sources)
+        .set({ maturityStatus: 'validated' })
+        .where(eq(sources.id, source.id));
+      await expect(activateSource(db, workspace.id, source.id)).rejects.toBeInstanceOf(
+        GatewayError,
+      );
     });
   });
 

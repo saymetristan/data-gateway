@@ -1,6 +1,9 @@
-import { pgTable, uuid, text, jsonb, doublePrecision, timestamp, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { pgTable, uuid, text, jsonb, doublePrecision, timestamp, index, pgEnum, uniqueIndex } from 'drizzle-orm/pg-core';
 import { workspaces } from './workspaces.js';
 import { sources } from './sources.js';
+
+export const evalRunStatusEnum = pgEnum('eval_run_status', ['running', 'completed', 'failed']);
 
 export const evalSets = pgTable(
   'eval_sets',
@@ -19,6 +22,10 @@ export const evalSets = pgTable(
   (table) => [
     index('eval_sets_workspace_id_idx').on(table.workspaceId),
     index('eval_sets_source_id_idx').on(table.sourceId),
+    uniqueIndex('eval_sets_workspace_source_unique').on(table.workspaceId, table.sourceId),
+    uniqueIndex('eval_sets_workspace_global_unique')
+      .on(table.workspaceId)
+      .where(sql`${table.sourceId} IS NULL`),
   ],
 );
 
@@ -45,7 +52,7 @@ export const evalRuns = pgTable(
     evalSetId: uuid('eval_set_id')
       .notNull()
       .references(() => evalSets.id, { onDelete: 'cascade' }),
-    status: text('status').notNull(),
+    status: evalRunStatusEnum('status').notNull(),
     metrics: jsonb('metrics').notNull().default({}),
     passed: jsonb('passed'),
     failed: jsonb('failed'),

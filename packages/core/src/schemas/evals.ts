@@ -55,6 +55,7 @@ export const evalRunResponseSchema = z.object({
   failed: z.array(evalCaseResultSchema),
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
+  stale: z.boolean().optional(),
 });
 
 export type CreateEvalSetInput = z.infer<typeof createEvalSetSchema>;

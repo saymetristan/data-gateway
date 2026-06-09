@@ -17,6 +17,7 @@ import {
   aggregateEvalMetrics,
   countSensitiveLeaks,
   evaluateCase,
+  filterMatches,
   precisionAtK,
   toCaseResults,
   type EvalCaseAssertions,
@@ -37,6 +38,19 @@ export async function createEvalSet(
 ) {
   if (input.sourceId) {
     await getSourceForWorkspace(db, workspaceId, input.sourceId);
+  }
+
+  const existingSet = await getApplicableEvalSetForScope(
+    db,
+    workspaceId,
+    input.sourceId ?? null,
+  );
+  if (existingSet) {
+    throw GatewayError.conflict(
+      input.sourceId
+        ? 'Eval set already exists for source'
+        : 'Global eval set already exists for workspace',
+    );
   }
 
   const [workspace] = await db
@@ -196,6 +210,10 @@ export async function runEvalSet(
     throw GatewayError.notFound('Eval run not found');
   }
 
+  if (row.run.status !== 'running') {
+    return;
+  }
+
   const cases = await db
     .select()
     .from(evalCases)
@@ -249,12 +267,7 @@ export async function runEvalSet(
       const filterScore =
         assertions.mustApplyFilters?.length
           ? assertions.mustApplyFilters.filter((filter) =>
-              response.applied_filters.some(
-                (applied) =>
-                  applied.field === filter.field &&
-                  applied.op === filter.op &&
-                  JSON.stringify(applied.value) === JSON.stringify(filter.value),
-              ),
+              filterMatches(filter, response.applied_filters),
             ).length / assertions.mustApplyFilters.length
           : 1;
 
@@ -296,7 +309,7 @@ export async function runEvalSet(
       })
       .where(eq(evalRuns.id, evalRunId));
 
-    if (metrics.score >= row.evalSet.threshold) {
+    if (metrics.score >= row.evalSet.threshold && metrics.sensitiveLeaks === 0) {
       await promoteSourcesAfterEvalPass(db, workspaceId, row.evalSet, evalRunId);
     }
   } catch (error) {
@@ -375,11 +388,16 @@ export async function activateSource(
     );
   }
 
-  const metrics = latestRun.metrics as { score?: number };
+  const metrics = latestRun.metrics as { score?: number; sensitiveLeaks?: number };
   const score = metrics.score ?? 0;
   if (score < evalSet.threshold) {
     throw GatewayError.conflict(
       `Latest eval run ${latestRun.id} score ${String(score)} below threshold ${String(evalSet.threshold)}`,
+    );
+  }
+  if ((metrics.sensitiveLeaks ?? 0) > 0) {
+    throw GatewayError.conflict(
+      `Latest eval run ${latestRun.id} has ${String(metrics.sensitiveLeaks)} sensitive leaks`,
     );
   }
 
@@ -407,6 +425,24 @@ async function getEvalSetForWorkspace(
   }
 
   return evalSet;
+}
+
+async function getApplicableEvalSetForScope(
+  db: Database,
+  workspaceId: string,
+  sourceId: string | null,
+) {
+  const [evalSet] = await db
+    .select()
+    .from(evalSets)
+    .where(
+      sourceId
+        ? and(eq(evalSets.workspaceId, workspaceId), eq(evalSets.sourceId, sourceId))
+        : and(eq(evalSets.workspaceId, workspaceId), isNull(evalSets.sourceId)),
+    )
+    .limit(1);
+
+  return evalSet ?? null;
 }
 
 async function listQueryableSources(
