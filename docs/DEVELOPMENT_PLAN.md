@@ -29,23 +29,39 @@ Objetivos concretos:
 ## Stack técnico
 
 - **Runtime/API**: Node.js + TypeScript + Hono
-- **Base de datos**: Postgres 16 + `pgvector` + `pg_trgm` + `unaccent` (vía Docker Compose en local); full-text con configuración `spanish`
+- **Base de datos**: Postgres + `pgvector` + `pg_trgm` + `unaccent`; full-text con configuración `spanish`. Local: Docker Compose (imagen `pgvector/pgvector:pg17`). Prod: Supabase proyecto `data-ingest` (Postgres 17.6, pgvector 0.8.0, extensiones ya habilitadas, ref `zrwnxulqnyeuzhajbeju`)
 - **ORM/migraciones**: Drizzle
 - **Queue/workers**: pg-boss (jobs en Postgres con encolado transaccional junto a las escrituras de datos); migrar a BullMQ + Redis solo si el volumen lo exige
 - **Embeddings**: `qwen/qwen3-embedding-8b` vía OpenRouter como baseline (supera a `bge-m3` en MTEB 2026 —70.6 vs 63.2— al mismo precio de $0.01/M; solicitar `dimensions: 1024` vía Matryoshka porque el índice HNSW de pgvector soporta máx. 2000 dims); `baai/bge-m3` disponible en el mismo endpoint para A/B vía evals; proveedor detrás de interfaz y modelo+dims registrados por embedding
 - **LLM (solo ingest y fallback de parsing)**: `nvidia/nemotron-3-ultra-550b-a55b:free` vía OpenRouter, detrás de interfaz configurable
 - **Validación**: Zod (request/response y configs de mapping)
 - **Package manager**: pnpm (workspaces de monorepo)
-- **Deployment**: desarrollo local con Docker Compose; la provisión de infraestructura se configura al cierre con yuntro MCP + skill `project-setup`
+- **Deployment**: Railway proyecto `data-gateway` (servicios api + worker) + Supabase `data-ingest` como Postgres prod; dominio objetivo `data.whaapy.com`
+
+## Setup ya ejecutado (pre-fase 1)
+
+El workspace ya quedó configurado vía `project-setup` + yuntro; nada de esto se repite en fase 1:
+
+- Repo `saymetristan/data-gateway` (privado) con git inicializado
+- MCPs project-scoped: `data-gateway-supabase` (prod DB) y `data-gateway-railway` (con project token); `.cursor/mcp.json` gitignored + `.example` regenerable con `pnpm mcp:example`
+- Supabase `data-ingest` verificado limpio; extensiones `vector`/`pg_trgm`/`unaccent` habilitadas vía migración registrada
+- Railway proyecto `data-gateway` creado (env production, sin servicios aún)
+- `.env` real con `OPENROUTER_API_KEY` y `CREDENTIALS_ENCRYPTION_KEY` generada; `.env.example` como espejo documentado para variables de Railway
+- Cursor rules (7 propias + generadas por yuntro), `.agent/operating-model.yaml`, hooks, skills `feature-cycle`/`platform-change`
+- CI: `agent-doctor.yml` (yuntro) + `security.yml` (gitleaks); Renovate configurado
+- `package.json` raíz con `engines` (node ≥22, pnpm ≥9) y script `mcp:example`; `.nvmrc`, `.editorconfig`
+- Branch protection NO disponible (GitHub free + repo privado); mitigación: hook de yuntro bloquea `git push --force` en agentes
+- Fase 1 ajustada: el monorepo se construye extendiendo el `package.json` raíz existente
 
 ## Tareas de desarrollo
 
 ### Fase 1: Fundaciones (repo, schema base, API skeleton)
 
-- [ ] Inicializar monorepo TypeScript
+- [ ] Inicializar monorepo TypeScript (extendiendo el `package.json` raíz existente con pnpm workspaces)
   - [ ] `apps/api` (Hono), `apps/worker` (pg-boss), `packages/core` (dominio compartido), `packages/mcp-server` (vacío por ahora)
   - [ ] Tooling: tsconfig estricto, ESLint, Prettier, Vitest, scripts npm
-- [ ] Docker Compose: Postgres 16 con `pgvector`, `pg_trgm` y `unaccent`
+  - [ ] CI `ci.yml`: lint + typecheck + test con Postgres de servicio (se suma a `agent-doctor.yml` y `security.yml` ya existentes)
+- [ ] Docker Compose: Postgres con `pgvector`, `pg_trgm` y `unaccent` (imagen `pgvector/pgvector:pg17`, paridad con prod 17.6)
 - [ ] Schema inicial con Drizzle + migraciones
   - [ ] `workspaces`, `api_keys` (hash, scopes, workspace_id)
   - [ ] `sources` (tipo, config, estado de madurez), `source_records_raw` (payload original, source_record_id, synced_at)

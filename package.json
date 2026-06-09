@@ -1,0 +1,12 @@
+{
+  "name": "data-gateway",
+  "private": true,
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "mcp:example": "jq '.mcpServers |= with_entries((.value.env // {}) as $env | .value.env = ($env | with_entries(if .key == \"SUPABASE_ACCESS_TOKEN\" then .value = \"YOUR_SUPABASE_PAT\" elif .key == \"RAILWAY_API_TOKEN\" then .value = \"YOUR_RAILWAY_ACCOUNT_TOKEN\" elif .key == \"RAILWAY_TOKEN\" then .value = \"YOUR_RAILWAY_PROJECT_TOKEN\" elif .key == \"SUPABASE_PROJECT_REF\" then . else .value = (\"YOUR_\" + .key) end)) | if .value.args then .value.args |= map(sub(\"^/Users/[^/]+/\"; \"/Users/YOUR_USER/\")) else . end)' .cursor/mcp.json > .cursor/mcp.json.example"
+  }
+}
