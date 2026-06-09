@@ -144,3 +144,64 @@ confidence = 0.35·scoreGap + 0.25·filterCoverage + 0.25·lexicalOverlap + 0.15
 - Embedding provider falla → `lexical` + warning (no 500)
 - Sin LLM o `useLlmFallback: false` → solo extractor determinístico
 - LLM devuelve campos inválidos → descartados con warning
+
+## Madurez de fuentes
+
+```
+connected → profiled → mapped → indexed → validated → agent_ready
+```
+
+- `profiled`: tras profiling
+- `mapped`: mapping activo creado
+- `indexed`: records + embeddings generados
+- `validated`: último eval run del set aplicable supera `threshold`
+- `agent_ready`: `POST /sources/:id/activate` tras `validated`
+
+Re-index o mapping nuevo sobre `validated`/`agent_ready` regresa a `indexed`. Transiciones auditadas en `source_transitions`.
+
+## Evals (gate de activación)
+
+Scopes: `evals:read`, `evals:write` (legacy keys sin scopes = permitido).
+
+```bash
+# Crear eval set (opcional sourceId para gate por fuente)
+curl -X POST http://localhost:3000/evals/sets \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY" \
+  -d '{"name":"Ecommerce","sourceId":"...","threshold":0.8}'
+
+# Añadir case (al menos una assertion)
+curl -X POST http://localhost:3000/evals/sets/{set_id}/cases \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY" \
+  -d '{"query":"SKU-00042","expectedExternalIds":["42"]}'
+
+# Ejecutar eval set (worker job evals.run)
+curl -X POST http://localhost:3000/evals/run \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY" \
+  -d '{"evalSetId":"..."}'
+
+# Ver resultado
+curl http://localhost:3000/evals/runs/{run_id} \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY"
+
+# Activar fuente (requiere validated + último run >= threshold)
+curl -X POST http://localhost:3000/sources/{source_id}/activate \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY"
+```
+
+**Assertions por case** (al menos una):
+
+| Campo | Descripción |
+|-------|-------------|
+| `expectedExternalIds` | IDs externos (`records.external_id`), no UUIDs de records |
+| `mustApplyFilters` | Filtros que deben aparecer en `applied_filters` |
+| `mustNotContainFields` | Campos que no deben salir en `data` (ej. `cost`) |
+
+**Métricas del run**:
+
+- `score = casesPassed / casesTotal` (gate principal)
+- `precisionAtK`: promedio de precision@k por case con `expectedExternalIds`
+- `filterAccuracy`: fracción de filtros requeridos aplicados
+- `sensitiveLeaks`: conteo de campos prohibidos en responses (debe ser 0)
+- `latencyMsP50` / `latencyMsP95`
+
+Fixture: `fixtures/ecommerce-evals.json` (24 cases para el catálogo de prueba).

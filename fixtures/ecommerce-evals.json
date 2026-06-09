@@ -1,0 +1,53 @@
+{
+  "name": "Ecommerce fixture evals",
+  "description": "Eval set for the catalog fixture (~300 products)",
+  "threshold": 0.8,
+  "cases": [
+    { "query": "SKU-00042", "expectedExternalIds": ["42"] },
+    { "query": "SKU-00001", "expectedExternalIds": ["1"] },
+    { "query": "SKU-00100", "expectedExternalIds": ["100"] },
+    { "query": "SKU-00010", "expectedExternalIds": ["10"] },
+    { "query": "SKU-00099", "expectedExternalIds": ["99"] },
+    { "query": "SKU-00250", "expectedExternalIds": ["250"] },
+    { "query": "menos de 100", "mustApplyFilters": [{ "field": "price", "op": "lt", "value": 100 }] },
+    { "query": "menos de 200", "mustApplyFilters": [{ "field": "price", "op": "lt", "value": 200 }] },
+    { "query": "maximo 60", "mustApplyFilters": [{ "field": "price", "op": "lte", "value": 60 }] },
+    { "query": "mas de 180", "mustApplyFilters": [{ "field": "price", "op": "gt", "value": 180 }] },
+    { "query": "desde 100", "mustApplyFilters": [{ "field": "price", "op": "gte", "value": 100 }] },
+    { "query": "hasta 300", "mustApplyFilters": [{ "field": "price", "op": "lte", "value": 300 }] },
+    { "query": "por debajo de 75", "mustApplyFilters": [{ "field": "price", "op": "lt", "value": 75 }] },
+    {
+      "query": "entre 50 y 55",
+      "mustApplyFilters": [
+        { "field": "price", "op": "gte", "value": 50 },
+        { "field": "price", "op": "lte", "value": 55 }
+      ]
+    },
+    {
+      "query": "entre 500 y 900",
+      "mustApplyFilters": [
+        { "field": "price", "op": "gte", "value": 500 },
+        { "field": "price", "op": "lte", "value": 900 }
+      ]
+    },
+    { "query": "camiseta rojo", "mustApplyFilters": [{ "field": "color", "op": "eq", "value": "rojo" }] },
+    { "query": "vestido azul", "mustApplyFilters": [{ "field": "color", "op": "eq", "value": "azul" }] },
+    { "query": "talla M", "mustApplyFilters": [{ "field": "size", "op": "eq", "value": "M" }] },
+    { "query": "camisetas", "mustApplyFilters": [{ "field": "category", "op": "eq", "value": "camisetas" }] },
+    {
+      "query": "camiseta rojo menos de 100",
+      "mustApplyFilters": [
+        { "field": "color", "op": "eq", "value": "rojo" },
+        { "field": "price", "op": "lt", "value": 100 }
+      ]
+    },
+    { "query": "SKU-00042", "mustNotContainFields": ["cost"] },
+    { "query": "camiseta azul", "mustNotContainFields": ["cost"] },
+    { "query": "menos de 1500", "mustNotContainFields": ["cost"] },
+    {
+      "query": "camiseta rojo menos de 100",
+      "mustApplyFilters": [{ "field": "available", "op": "eq", "value": true }],
+      "mustNotContainFields": ["cost"]
+    }
+  ]
+}

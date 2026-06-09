@@ -6,6 +6,7 @@ import type { CreateMappingInput } from '../schemas/mapping.js';
 import { mappingDocumentSchema } from '../schemas/mapping.js';
 import { validateMappingAgainstProfile } from '../mapping/validate.js';
 import { getSourceProfile } from './profile.js';
+import { maybeTransitionSourceMaturity } from './maturity.js';
 
 export async function createSourceMapping(
   db: Database,
@@ -57,12 +58,12 @@ export async function createSourceMapping(
     throw GatewayError.internal('Failed to create mapping');
   }
 
-  if (source.maturityStatus === 'profiled' || source.maturityStatus === 'connected') {
-    await db
-      .update(sources)
-      .set({ maturityStatus: 'mapped', updatedAt: new Date() })
-      .where(eq(sources.id, sourceId));
-  }
+  await maybeTransitionSourceMaturity(db, sourceId, 'mapped', 'mapping_created', [
+    'profiled',
+    'connected',
+    'validated',
+    'agent_ready',
+  ]);
 
   return created;
 }

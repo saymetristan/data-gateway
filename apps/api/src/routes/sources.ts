@@ -4,6 +4,7 @@ import {
   createSourceSchema,
   createSourceWithValidation,
   createMappingSchema,
+  activateSource,
   createSourceMapping,
   enqueueJob,
   GatewayError,
@@ -163,6 +164,19 @@ export function sourceRoutes(deps: AppBindings) {
     });
 
     return c.json({ jobId, status: 'queued' }, 202);
+  });
+
+  routes.post('/:id/activate', requireScope('sources:write'), async (c) => {
+    const db = c.get('db');
+    const workspaceId = c.get('workspaceId');
+    const sourceId = sourceIdParam(c.req.param('id'));
+    const source = await activateSource(db, workspaceId, sourceId);
+
+    return c.json({
+      id: source.id,
+      maturityStatus: source.maturityStatus,
+      updatedAt: source.updatedAt.toISOString(),
+    });
   });
 
   routes.get('/:id/status', requireScope('sources:read'), async (c) => {

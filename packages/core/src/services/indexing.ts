@@ -25,6 +25,7 @@ import { payloadHash, promptHash } from '../utils/hash.js';
 import { enqueueJob } from '../queue/boss.js';
 import { EMBEDDINGS_GENERATE_JOB } from '../queue/jobs.js';
 import { getActiveMapping, getMappingByVersion } from './mappings.js';
+import { maybeTransitionSourceMaturity } from './maturity.js';
 
 const EMBEDDING_BATCH_SIZE = 50;
 const RAW_BATCH_SIZE = 500;
@@ -144,10 +145,12 @@ export async function indexSource(
   }
 
   if (indexed > 0) {
-    await db
-      .update(sources)
-      .set({ maturityStatus: 'indexed', updatedAt: new Date() })
-      .where(eq(sources.id, sourceId));
+    await maybeTransitionSourceMaturity(db, sourceId, 'indexed', 'source_indexed', [
+      'mapped',
+      'validated',
+      'agent_ready',
+      'indexed',
+    ]);
   }
 
   return {

@@ -4,12 +4,14 @@ import { registerJobs as registerHealthJobs, scheduleJobs as scheduleHealthJobs 
 import { registerSyncJobs } from './sync.js';
 import { registerProfileJobs } from './profile.js';
 import { registerIndexingJobs } from './indexing.js';
+import { registerEvalJobs } from './evals.js';
 
 export function registerJobs(boss: PgBoss, env: WorkerEnv): void {
   registerHealthJobs(boss);
   registerSyncJobs(boss, env);
   registerProfileJobs(boss, env);
   registerIndexingJobs(boss, env);
+  registerEvalJobs(boss, env);
 }
 
 export async function scheduleJobs(boss: PgBoss): Promise<void> {

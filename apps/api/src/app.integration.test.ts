@@ -88,6 +88,40 @@ describe.runIf(hasDatabase)('API integration', () => {
     expect(res.status).toBe(401);
   });
 
+  it('returns 401 on /evals/run when API key lacks evals:write scope', async () => {
+    const wsRes = await app.request('/workspaces', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Eval Scope', slug: `eval-scope-${Date.now()}` }),
+    });
+    expect(wsRes.status).toBe(201);
+    const workspace = (await wsRes.json()) as { id: string };
+
+    const keyRes = await app.request(`/workspaces/${workspace.id}/api-keys`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ scopes: ['sources:read'] }),
+    });
+    expect(keyRes.status).toBe(201);
+    const { key } = (await keyRes.json()) as { key: string };
+
+    const res = await app.request('/evals/run', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ evalSetId: crypto.randomUUID() }),
+    });
+    expect(res.status).toBe(401);
+  });
+
   it('creates workspace, api key and source end-to-end', async () => {
     const wsRes = await app.request('/workspaces', {
       method: 'POST',

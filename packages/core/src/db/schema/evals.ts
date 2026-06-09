@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, jsonb, doublePrecision, timestamp, index } from 'drizzle-orm/pg-core';
 import { workspaces } from './workspaces.js';
+import { sources } from './sources.js';
 
 export const evalSets = pgTable(
   'eval_sets',
@@ -8,13 +9,17 @@ export const evalSets = pgTable(
     workspaceId: uuid('workspace_id')
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
+    sourceId: uuid('source_id').references(() => sources.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     description: text('description'),
     threshold: doublePrecision('threshold').notNull().default(0.8),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('eval_sets_workspace_id_idx').on(table.workspaceId)],
+  (table) => [
+    index('eval_sets_workspace_id_idx').on(table.workspaceId),
+    index('eval_sets_source_id_idx').on(table.sourceId),
+  ],
 );
 
 export const evalCases = pgTable(

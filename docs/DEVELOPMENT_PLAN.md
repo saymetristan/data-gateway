@@ -109,17 +109,18 @@ El workspace ya quedó configurado vía `project-setup` + yuntro; nada de esto s
 - Tests: 65 passing (unit extractor/RRF/confidence/shaping/LLM + integration E2E fixture + scope API)
 - STOP — revisión humana antes de fase 4
 
-### Fase 4: Evals como gate de activación
+### Fase 4: Evals como gate de activación — COMPLETADA
 
-- Modelo de eval cases: query → `expected_result_ids` y/o `must_apply_filters` y/o `must_not_contain_fields`
-- Runner de evals (worker): ejecuta el set contra `/query`, persiste `eval_runs` con métricas (precision@k, filtros correctos, sin campos sensibles, latencia)
-- `POST /evals/run` y `GET /evals/runs/:id`
-- Escribir ≥20 eval cases para el workspace del fixture ecommerce (búsqueda, recomendación, disponibilidad, filtros de precio, SKU exacto)
-- Gate de madurez: una fuente solo pasa a `agent-ready` si su último eval run supera el umbral configurado del workspace
-- Transiciones de estado de fuente implementadas y auditadas (`connected → profiled → indexed → mapped → validated → agent-ready`)
-- Tests: runner con resultados mockeados, gate bloquea activación si fallan evals
-- Realizar auto-revisión del código; marcar como hecho solo cuando la fase cumpla el 100% de los requisitos
-- STOP y esperar revisión humana
+- Schemas Zod (`packages/core/src/schemas/evals.ts`): sets, cases (≥1 assertion), runs, métricas tipadas
+- Migración `0003`: `eval_sets.source_id` (gate por fuente) + `source_transitions` (auditoría)
+- Máquina de estados auditada (`services/maturity.ts`): `connected → profiled → mapped → indexed → validated → agent_ready`
+- Runner in-process (`services/evals.ts`) + job worker `evals.run`; métricas: score, precision@k, filterAccuracy, sensitiveLeaks, latencia p50/p95
+- CRUD API: `POST/GET /evals/sets`, `POST /evals/sets/:id/cases`, `POST /evals/run`, `GET /evals/runs/:id` (scopes `evals:read`/`evals:write`)
+- `POST /sources/:id/activate`: gate por último eval run completado del set aplicable (específico de fuente o global del workspace)
+- Run exitoso (`score >= threshold`) promueve fuentes `indexed` → `validated`; activación explícita → `agent_ready`
+- Fixture `fixtures/ecommerce-evals.json` (24 cases: SKU, precio, enums, sensibles, disponibilidad)
+- Tests: unit métricas/state machine/schemas + integration E2E (run, gate, re-index invalida, scope API)
+- STOP — revisión humana antes de fase 5
 
 ### Fase 5: Segundo dominio — conector Shopify (validación de la abstracción)
 

@@ -8,6 +8,7 @@ import { healthRoutes } from './routes/health.js';
 import { workspaceRoutes } from './routes/workspaces.js';
 import { sourceRoutes } from './routes/sources.js';
 import { queryRoutes } from './routes/query.js';
+import { evalRoutes } from './routes/evals.js';
 
 export type AppVariables = {
   db: Database;
@@ -57,6 +58,10 @@ export function createApp(deps: AppBindings) {
   app.use('/query', workspaceAuth());
   app.use('/query/*', workspaceAuth());
   app.route('/query', queryRoutes(deps));
+
+  app.use('/evals', workspaceAuth());
+  app.use('/evals/*', workspaceAuth());
+  app.route('/evals', evalRoutes(deps));
 
   return app;
 }

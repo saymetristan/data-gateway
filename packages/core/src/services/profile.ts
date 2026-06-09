@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { sourceProfiles, sourceRecordsRaw, sources } from '../db/schema/index.js';
 import { GatewayError } from '../errors/gateway-error.js';
+import { maybeTransitionSourceMaturity } from './maturity.js';
 import type { ProfileColumn, SourceProfileDocument } from '../schemas/profile.js';
 import { toScalarString } from '../utils/scalar.js';
 
@@ -61,12 +62,7 @@ export async function profileSource(db: Database, sourceId: string): Promise<Sou
     await db.insert(sourceProfiles).values({ sourceId, document });
   }
 
-  if (source.maturityStatus === 'connected') {
-    await db
-      .update(sources)
-      .set({ maturityStatus: 'profiled', updatedAt: new Date() })
-      .where(eq(sources.id, sourceId));
-  }
+  await maybeTransitionSourceMaturity(db, sourceId, 'profiled', 'source_profiled', ['connected']);
 
   return document;
 }
