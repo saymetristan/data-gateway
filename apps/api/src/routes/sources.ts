@@ -7,6 +7,7 @@ import {
   createSourceMapping,
   enqueueJob,
   GatewayError,
+  getActiveMapping,
   getSourceForWorkspace,
   getSourceProfile,
   getSourceStatus,
@@ -153,6 +154,7 @@ export function sourceRoutes(deps: AppBindings) {
     const workspaceId = c.get('workspaceId');
     const sourceId = c.req.param('id');
     await getSourceForWorkspace(db, workspaceId, sourceId);
+    await getActiveMapping(db, sourceId);
 
     const jobId = await enqueueJob(deps.env.DATABASE_URL, SOURCE_INDEX_JOB, {
       sourceId,

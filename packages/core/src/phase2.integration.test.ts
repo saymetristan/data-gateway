@@ -24,12 +24,14 @@ import {
 } from './index.js';
 import { withTestDatabase } from './test/db-helper.js';
 import type { MappingDocument } from './schemas/mapping.js';
+import type { LlmProvider } from './providers/llm.js';
 
 const hasFixture =
   process.env.RUN_INTEGRATION_TESTS === 'true' || process.env.CI === 'true';
 const FIXTURE_URL =
   process.env.FIXTURE_DATABASE_URL ??
   'postgresql://readonly_user:readonly_pass@localhost:5433/catalog';
+const FIXTURE_WRITE_URL = FIXTURE_URL.replace('readonly_user:readonly_pass', 'write_user:write_pass');
 const ENCRYPTION_KEY =
   process.env.CREDENTIALS_ENCRYPTION_KEY ??
   Buffer.alloc(32, 7).toString('base64');
@@ -44,12 +46,7 @@ async function ensureFixtureSeeded(): Promise<void> {
   const adminUrl = FIXTURE_URL.replace('readonly_user:readonly_pass', 'postgres:postgres');
   const pool = new pg.Pool({ connectionString: adminUrl });
   try {
-    const exists = await pool.query(
-      `SELECT to_regclass('public.products') AS table_name`,
-    );
-    if (!exists.rows[0]?.table_name) {
-      await pool.query(seedSql);
-    }
+    await pool.query(seedSql);
   } finally {
     await pool.end();
   }
@@ -123,6 +120,29 @@ const productMapping: MappingDocument = {
   ],
 };
 
+const productMappingWithEnrichment: MappingDocument = {
+  entities: [
+    {
+      ...productMapping.entities[0]!,
+      enrichment: {
+        prompt: 'Clasifica este producto: {{description}}',
+        inputFields: ['description'],
+        outputFields: [{ name: 'semantic_category', type: 'string' }],
+      },
+    },
+  ],
+};
+
+class CountingLlmProvider implements LlmProvider {
+  readonly model = 'counting-llm';
+  calls = 0;
+
+  complete(): Promise<string> {
+    this.calls += 1;
+    return Promise.resolve(JSON.stringify({ semantic_category: 'ropa' }));
+  }
+}
+
 describe.runIf(hasFixture)('phase 2 integration', () => {
   beforeAll(async () => {
     await ensureFixtureSeeded();
@@ -139,6 +159,17 @@ describe.runIf(hasFixture)('phase 2 integration', () => {
       const products = schema.find((table) => table.name === 'products');
       expect(products?.primaryKey).toContain('id');
       expect(products?.columns.some((column) => column.name === 'sku')).toBe(true);
+    } finally {
+      await connector.close();
+    }
+  });
+
+  it('rejects write-capable fixture users', async () => {
+    const connector = createDatabaseConnector(FIXTURE_WRITE_URL);
+    try {
+      const validation = await connector.validateReadOnlyConnection();
+      expect(validation.ok).toBe(true);
+      expect(validation.readOnly).toBe(false);
     } finally {
       await connector.close();
     }
@@ -181,10 +212,10 @@ describe.runIf(hasFixture)('phase 2 integration', () => {
         testUrl,
         { fullSync: true },
       );
-      expect(syncResult.synced).toBeGreaterThan(0);
+      expect(syncResult.synced).toBe(300);
 
       const profile = await profileSource(db, sourceId);
-      expect(profile.totalRecords).toBeGreaterThan(0);
+      expect(profile.totalRecords).toBe(300);
 
       const mapping = await createSourceMapping(db, sourceId, workspaceId, {
         document: productMapping,
@@ -198,10 +229,10 @@ describe.runIf(hasFixture)('phase 2 integration', () => {
         testUrl,
         new MockLlmProvider(),
       );
-      expect(indexResult.indexed).toBeGreaterThan(0);
+      expect(indexResult.indexed).toBe(300);
 
       const indexedRecords = await db.select().from(records).where(eq(records.sourceId, sourceId));
-      expect(indexedRecords.length).toBeGreaterThan(0);
+      expect(indexedRecords).toHaveLength(300);
       expect(indexedRecords[0]?.searchSource.length).toBeGreaterThan(0);
 
       const written = await generateEmbeddingsForRecords(
@@ -232,7 +263,94 @@ describe.runIf(hasFixture)('phase 2 integration', () => {
         { fullSync: true },
       );
       expect(resync.synced).toBe(0);
-      expect(rawCount.length).toBeGreaterThan(0);
+      expect(rawCount).toHaveLength(300);
+    });
+  });
+
+  it('does not call LLM twice for unchanged enriched records', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const slug = `enrich-${crypto.randomUUID().slice(0, 8)}`;
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Enrich', slug, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace not created');
+
+      const encryptedConfig = encryptSourceConfig(
+        'database_url',
+        { connectionUrl: FIXTURE_URL, tables: ['products'] },
+        ENCRYPTION_KEY,
+      );
+      const [source] = await db
+        .insert(sources)
+        .values({
+          workspaceId: workspace.id,
+          type: 'database_url',
+          name: 'Fixture Enrich',
+          config: encryptedConfig,
+          maturityStatus: 'connected',
+        })
+        .returning();
+      if (!source) throw new Error('source not created');
+
+      await syncDatabaseSource(db, source.id, workspace.id, ENCRYPTION_KEY, testUrl, {
+        fullSync: true,
+      });
+      await profileSource(db, source.id);
+      await createSourceMapping(db, source.id, workspace.id, {
+        document: productMappingWithEnrichment,
+      });
+
+      const provider = new CountingLlmProvider();
+      await indexSource(db, source.id, workspace.id, testUrl, provider);
+      expect(provider.calls).toBe(300);
+
+      await indexSource(db, source.id, workspace.id, testUrl, provider);
+      expect(provider.calls).toBe(300);
+    });
+  });
+
+  it('incremental sync handles duplicate cursor values without dropping rows', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const slug = `incremental-${crypto.randomUUID().slice(0, 8)}`;
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Incremental', slug, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace not created');
+
+      const encryptedConfig = encryptSourceConfig(
+        'database_url',
+        { connectionUrl: FIXTURE_URL, tables: ['products'] },
+        ENCRYPTION_KEY,
+      );
+      const [source] = await db
+        .insert(sources)
+        .values({
+          workspaceId: workspace.id,
+          type: 'database_url',
+          name: 'Fixture Incremental',
+          config: encryptedConfig,
+          maturityStatus: 'connected',
+        })
+        .returning();
+      if (!source) throw new Error('source not created');
+
+      const firstSync = await syncDatabaseSource(
+        db,
+        source.id,
+        workspace.id,
+        ENCRYPTION_KEY,
+        testUrl,
+        { fullSync: false },
+      );
+      expect(firstSync.synced).toBe(300);
+
+      const rawRows = await db
+        .select()
+        .from(sourceRecordsRaw)
+        .where(eq(sourceRecordsRaw.sourceId, source.id));
+      expect(rawRows).toHaveLength(300);
     });
   });
 });

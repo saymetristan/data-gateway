@@ -11,7 +11,7 @@ export function validateMappingAgainstProfile(
   for (const entity of document.entities) {
     const tableProfile = tables.get(entity.sourceTable);
     if (!tableProfile) {
-      throw GatewayError.validation(
+      throw GatewayError.unprocessable(
         `Mapping references unknown table "${entity.sourceTable}"`,
       );
     }
@@ -20,12 +20,12 @@ export function validateMappingAgainstProfile(
     for (const field of entity.fields) {
       const column = columns.get(field.sourceColumn);
       if (!column) {
-        throw GatewayError.validation(
+        throw GatewayError.unprocessable(
           `Field "${field.name}" references unknown column "${field.sourceColumn}" in table "${entity.sourceTable}"`,
         );
       }
       if (!isCompatibleType(field.type, column.inferredType)) {
-        throw GatewayError.validation(
+        throw GatewayError.unprocessable(
           `Field "${field.name}" type "${field.type}" is incompatible with profile type "${column.inferredType}"`,
         );
       }
@@ -33,7 +33,7 @@ export function validateMappingAgainstProfile(
 
     for (const rule of entity.rules) {
       if (!columns.has(rule.column)) {
-        throw GatewayError.validation(
+        throw GatewayError.unprocessable(
           `Rule for "${rule.field}" references unknown column "${rule.column}"`,
         );
       }
@@ -43,7 +43,7 @@ export function validateMappingAgainstProfile(
     for (const match of entity.embeddingTextTemplate.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)) {
       const fieldName = match[1];
       if (fieldName && !fieldNames.has(fieldName)) {
-        throw GatewayError.validation(
+        throw GatewayError.unprocessable(
           `Embedding template references unknown field "${fieldName}" in entity "${entity.entity}"`,
         );
       }
@@ -52,7 +52,7 @@ export function validateMappingAgainstProfile(
     if (entity.enrichment) {
       for (const inputField of entity.enrichment.inputFields) {
         if (!fieldNames.has(inputField)) {
-          throw GatewayError.validation(
+          throw GatewayError.unprocessable(
             `Enrichment input field "${inputField}" is not defined in entity "${entity.entity}"`,
           );
         }

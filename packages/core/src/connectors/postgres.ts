@@ -25,6 +25,18 @@ export class PostgresConnector implements DatabaseConnector {
       await client.query('SELECT 1');
       await client.query('ROLLBACK');
 
+      const roleCheck = await client.query<{ is_superuser: boolean }>(
+        `SELECT rolsuper AS is_superuser FROM pg_roles WHERE rolname = current_user`,
+      );
+      if (roleCheck.rows[0]?.is_superuser) {
+        return {
+          ok: true,
+          readOnly: false,
+          dialect: 'postgres' as const,
+          message: 'Connection user is superuser; use a SELECT-only role',
+        };
+      }
+
       const writeCheck = await client.query(`
         SELECT COUNT(*)::int AS write_privileges
         FROM information_schema.table_privileges
@@ -179,7 +191,9 @@ export class PostgresConnector implements DatabaseConnector {
     const quoted = `"${schema.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`;
 
     let lastCursor: string | undefined = opts.cursorValue;
+    let lastTieBreaker: string | undefined = opts.cursorTieBreakerValue;
     const batchSize = opts.batchSize;
+    let offset = 0;
 
     for (;;) {
       let query = `SELECT * FROM ${quoted}`;
@@ -187,15 +201,32 @@ export class PostgresConnector implements DatabaseConnector {
 
       if (opts.cursorColumn && lastCursor !== undefined) {
         params.push(lastCursor);
-        query += ` WHERE "${opts.cursorColumn.replace(/"/g, '""')}" > $${String(params.length)}`;
+        const cursorIdentifier = quoteIdentifier(opts.cursorColumn);
+
+        if (opts.cursorTieBreakerColumn && lastTieBreaker !== undefined) {
+          params.push(lastTieBreaker);
+          const tieBreakerIdentifier = quoteIdentifier(opts.cursorTieBreakerColumn);
+          query += ` WHERE (${cursorIdentifier}, ${tieBreakerIdentifier}) > ($1, $2)`;
+        } else {
+          query += ` WHERE ${cursorIdentifier} > $${String(params.length)}`;
+        }
       }
 
-      if (opts.cursorColumn) {
-        query += ` ORDER BY "${opts.cursorColumn.replace(/"/g, '""')}" ASC`;
+      const orderBy = opts.cursorColumn
+        ? [opts.cursorColumn, ...(opts.cursorTieBreakerColumn ? [opts.cursorTieBreakerColumn] : [])]
+        : (opts.orderBy ?? []);
+
+      if (orderBy.length > 0) {
+        query += ` ORDER BY ${orderBy.map(quoteIdentifier).join(', ')}`;
       }
 
       params.push(batchSize);
       query += ` LIMIT $${String(params.length)}`;
+
+      if (!opts.cursorColumn) {
+        params.push(offset);
+        query += ` OFFSET $${String(params.length)}`;
+      }
 
       const result = await this.pool.query(query, params);
       if (result.rows.length === 0) break;
@@ -210,8 +241,13 @@ export class PostgresConnector implements DatabaseConnector {
         const cursorValue = lastRow?.[opts.cursorColumn];
         if (cursorValue === undefined || cursorValue === null) break;
         lastCursor = toScalarString(cursorValue);
+        if (opts.cursorTieBreakerColumn) {
+          const tieBreakerValue = lastRow?.[opts.cursorTieBreakerColumn];
+          if (tieBreakerValue === undefined || tieBreakerValue === null) break;
+          lastTieBreaker = toScalarString(tieBreakerValue);
+        }
       } else {
-        break;
+        offset += rows.length;
       }
     }
   }
@@ -219,4 +255,8 @@ export class PostgresConnector implements DatabaseConnector {
   async close(): Promise<void> {
     await this.pool.end();
   }
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
 }

@@ -26,8 +26,18 @@ export class MysqlConnector implements DatabaseConnector {
       );
       const grants = rows.map((row) => Object.values(row).join(' ')).join('\n').toUpperCase();
       const hasWrite =
-        grants.includes('INSERT') || grants.includes('UPDATE') || grants.includes('DELETE');
-      const readOnly = !hasWrite || grants.includes('SELECT') && !hasWrite;
+        grants.includes('ALL PRIVILEGES') ||
+        grants.includes('GRANT OPTION') ||
+        grants.includes('INSERT') ||
+        grants.includes('UPDATE') ||
+        grants.includes('DELETE') ||
+        grants.includes('CREATE') ||
+        grants.includes('DROP') ||
+        grants.includes('ALTER') ||
+        grants.includes('INDEX') ||
+        grants.includes('TRIGGER') ||
+        grants.includes('REFERENCES');
+      const readOnly = grants.includes('SELECT') && !hasWrite;
 
       return readOnly
         ? { ok: true, readOnly: true, dialect: 'mysql' as const }
@@ -129,7 +139,9 @@ export class MysqlConnector implements DatabaseConnector {
     const tableName = table.includes('.') ? (table.split('.')[1] ?? table) : table;
     const quoted = `\`${tableName.replace(/`/g, '``')}\``;
     let lastCursor: string | undefined = opts.cursorValue;
+    let lastTieBreaker: string | undefined = opts.cursorTieBreakerValue;
     const batchSize = opts.batchSize;
+    let offset = 0;
 
     for (;;) {
       let query = `SELECT * FROM ${quoted}`;
@@ -137,15 +149,32 @@ export class MysqlConnector implements DatabaseConnector {
 
       if (opts.cursorColumn && lastCursor !== undefined) {
         params.push(lastCursor);
-        query += ` WHERE \`${opts.cursorColumn.replace(/`/g, '``')}\` > ?`;
+        const cursorIdentifier = quoteIdentifier(opts.cursorColumn);
+
+        if (opts.cursorTieBreakerColumn && lastTieBreaker !== undefined) {
+          params.push(lastTieBreaker);
+          const tieBreakerIdentifier = quoteIdentifier(opts.cursorTieBreakerColumn);
+          query += ` WHERE (${cursorIdentifier}, ${tieBreakerIdentifier}) > (?, ?)`;
+        } else {
+          query += ` WHERE ${cursorIdentifier} > ?`;
+        }
       }
 
-      if (opts.cursorColumn) {
-        query += ` ORDER BY \`${opts.cursorColumn.replace(/`/g, '``')}\` ASC`;
+      const orderBy = opts.cursorColumn
+        ? [opts.cursorColumn, ...(opts.cursorTieBreakerColumn ? [opts.cursorTieBreakerColumn] : [])]
+        : (opts.orderBy ?? []);
+
+      if (orderBy.length > 0) {
+        query += ` ORDER BY ${orderBy.map(quoteIdentifier).join(', ')}`;
       }
 
       params.push(batchSize);
       query += ' LIMIT ?';
+
+      if (!opts.cursorColumn) {
+        params.push(offset);
+        query += ' OFFSET ?';
+      }
 
       const [rows] = await this.pool.query<mysql.RowDataPacket[]>(query, params);
       if (rows.length === 0) break;
@@ -160,8 +189,13 @@ export class MysqlConnector implements DatabaseConnector {
         const cursorValue = lastRow?.[opts.cursorColumn];
         if (cursorValue === undefined || cursorValue === null) break;
         lastCursor = toScalarString(cursorValue);
+        if (opts.cursorTieBreakerColumn) {
+          const tieBreakerValue = lastRow?.[opts.cursorTieBreakerColumn];
+          if (tieBreakerValue === undefined || tieBreakerValue === null) break;
+          lastTieBreaker = toScalarString(tieBreakerValue);
+        }
       } else {
-        break;
+        offset += batch.length;
       }
     }
   }
@@ -169,4 +203,8 @@ export class MysqlConnector implements DatabaseConnector {
   async close(): Promise<void> {
     await this.pool.end();
   }
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `\`${identifier.replace(/`/g, '``')}\``;
 }

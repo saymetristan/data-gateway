@@ -1,5 +1,11 @@
 import type PgBoss from 'pg-boss';
-import { createDb, profileSource, SOURCE_PROFILE_JOB, type SourceProfileJobData } from '@data-gateway/core';
+import {
+  createDbFromPool,
+  createPool,
+  profileSource,
+  SOURCE_PROFILE_JOB,
+  type SourceProfileJobData,
+} from '@data-gateway/core';
 import type { WorkerEnv } from '../env.js';
 
 export function registerProfileJobs(boss: PgBoss, env: WorkerEnv): void {
@@ -8,7 +14,12 @@ export function registerProfileJobs(boss: PgBoss, env: WorkerEnv): void {
     if (!job) return;
 
     const data = job.data as SourceProfileJobData;
-    const db = createDb(env.DATABASE_URL);
-    await profileSource(db, data.sourceId);
+    const pool = createPool(env.DATABASE_URL);
+    const db = createDbFromPool(pool);
+    try {
+      await profileSource(db, data.sourceId);
+    } finally {
+      await pool.end();
+    }
   });
 }

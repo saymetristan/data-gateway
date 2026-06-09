@@ -10,7 +10,15 @@ import { getDecryptedSourceConfig, updateSourceConfig } from './sources.js';
 import type { TableSchema } from '../connectors/types.js';
 import { toScalarString } from '../utils/scalar.js';
 
-type SyncState = Record<string, { cursorColumn?: string; cursorValue?: string }>;
+type SyncState = Record<
+  string,
+  {
+    cursorColumn?: string;
+    cursorValue?: string;
+    cursorTieBreakerColumn?: string;
+    cursorTieBreakerValue?: string;
+  }
+>;
 
 export async function syncDatabaseSource(
   db: Database,
@@ -50,17 +58,25 @@ export async function syncDatabaseSource(
       if (table.primaryKey.length === 0) continue;
 
       const tableKey = `${table.schema}.${table.name}`;
-      const cursorColumn = options.fullSync ? undefined : table.cursorColumn;
-      const cursorValue = cursorColumn ? syncState[tableKey]?.cursorValue : undefined;
-      let lastCursor = cursorValue;
-
+      const cursorColumn = table.cursorColumn;
+      const cursorTieBreakerColumn = cursorColumn ? table.primaryKey[0] : undefined;
+      const cursorState = !options.fullSync && cursorColumn ? syncState[tableKey] : undefined;
+      const orderBy = cursorColumn
+        ? [cursorColumn, ...(cursorTieBreakerColumn ? [cursorTieBreakerColumn] : [])]
+        : table.primaryKey;
       const streamOptions = {
         batchSize: 200,
-        ...(cursorColumn && cursorValue
-          ? { cursorColumn, cursorValue }
-          : cursorColumn
-            ? { cursorColumn }
-            : {}),
+        orderBy,
+        ...(!options.fullSync && cursorColumn
+          ? {
+              cursorColumn,
+              ...(cursorTieBreakerColumn ? { cursorTieBreakerColumn } : {}),
+              ...(cursorState?.cursorValue ? { cursorValue: cursorState.cursorValue } : {}),
+              ...(cursorState?.cursorTieBreakerValue
+                ? { cursorTieBreakerValue: cursorState.cursorTieBreakerValue }
+                : {}),
+            }
+          : {}),
       };
 
       for await (const batch of connector.streamRows(tableKey, streamOptions)) {
@@ -109,10 +125,21 @@ export async function syncDatabaseSource(
           const lastRow = batch[batch.length - 1];
           const value = lastRow?.[cursorColumn];
           if (value !== undefined && value !== null) {
-            lastCursor = toScalarString(value);
+            const tieBreakerValue =
+              cursorTieBreakerColumn === undefined ? undefined : lastRow?.[cursorTieBreakerColumn];
+            const tieBreakerString =
+              tieBreakerValue === undefined || tieBreakerValue === null
+                ? undefined
+                : toScalarString(tieBreakerValue);
             syncState[tableKey] = {
               cursorColumn,
-              cursorValue: lastCursor,
+              cursorValue: toScalarString(value),
+              ...(cursorTieBreakerColumn && tieBreakerString
+                ? {
+                    cursorTieBreakerColumn,
+                    cursorTieBreakerValue: tieBreakerString,
+                  }
+                : {}),
             };
           }
         }

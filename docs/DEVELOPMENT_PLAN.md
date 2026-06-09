@@ -57,36 +57,36 @@ El workspace ya quedó configurado vía `project-setup` + yuntro; nada de esto s
 
 ### Fase 1: Fundaciones (repo, schema base, API skeleton) — COMPLETADA
 
-- [x] Inicializar monorepo TypeScript (extendiendo el `package.json` raíz existente con pnpm workspaces)
-  - [x] `apps/api` (Hono), `apps/worker` (pg-boss), `packages/core` (dominio compartido), `packages/mcp-server` (stub)
-  - [x] Tooling: tsconfig estricto, ESLint, Prettier, Vitest, scripts npm
-  - [x] CI `ci.yml`: lint + typecheck + test con Postgres de servicio
-- [x] Docker Compose: Postgres con `pgvector`, `pg_trgm` y `unaccent` (`pgvector/pgvector:pg17`)
-- [x] Schema inicial con Drizzle + migraciones (11 tablas, extensiones, `es_unaccent`, HNSW/GIN)
-- [x] API skeleton: healthcheck, auth admin + workspace API key, `app.onError`, scoping por workspace
-- [x] CRUD mínimo: `POST /workspaces`, `POST /workspaces/:id/api-keys`, `POST /sources`
-- [x] Worker pg-boss: heartbeat job + graceful shutdown
-- [x] Tests unit + integration (13 tests)
-- [x] STOP — revisión humana antes de fase 2
+- Inicializar monorepo TypeScript (extendiendo el `package.json` raíz existente con pnpm workspaces)
+  - `apps/api` (Hono), `apps/worker` (pg-boss), `packages/core` (dominio compartido), `packages/mcp-server` (stub)
+  - Tooling: tsconfig estricto, ESLint, Prettier, Vitest, scripts npm
+  - CI `ci.yml`: lint + typecheck + test con Postgres de servicio
+- Docker Compose: Postgres con `pgvector`, `pg_trgm` y `unaccent` (`pgvector/pgvector:pg17`)
+- Schema inicial con Drizzle + migraciones (11 tablas, extensiones, `es_unaccent`, HNSW/GIN)
+- API skeleton: healthcheck, auth admin + workspace API key, `app.onError`, scoping por workspace
+- CRUD mínimo: `POST /workspaces`, `POST /workspaces/:id/api-keys`, `POST /sources`
+- Worker pg-boss: heartbeat job + graceful shutdown
+- Tests unit + integration (13 tests)
+- STOP — revisión humana antes de fase 2
 
 ### Fase 2: Ingesta e indexación (conector database URL como fuente inicial) — COMPLETADA
 
-- [x] Conector database URL (Postgres + MySQL; Supabase = Postgres)
-  - [x] Validación read-only al crear fuente (422 si tiene write)
-  - [x] Credenciales cifradas AES-256-GCM (`enc:v1:...`)
-  - [x] Introspección schema (information_schema + pg_catalog para PKs)
-  - [x] Sync incremental por cursor + full sync; hash idempotente en raw
-- [x] Conector CSV (`POST /sources/:id/upload`)
-- [x] Profiling sobre raw + `GET /sources/:id/profile` + tabla `source_profiles`
-- [x] Mapping Zod (`POST /sources/:id/mapping`) con validación contra perfil, versionado
-- [x] Enriquecimiento LLM opcional en ingest + cache `record_enrichments`
-- [x] Index pipeline: `source.index` + `embeddings.generate` (OpenRouter + mocks)
-  - [x] `records.search_source` → `search_text` generado
-  - [x] unique `(record_id, embedding_model, mapping_version)`
-- [x] `POST /sources/:id/sync|index`, `GET /sources/:id/status`
-- [x] Fixture ecommerce en docker-compose (`fixture-db:5433`, 300 productos, `readonly_user`)
-- [x] Tests: 25 passing (unit + integration e2e con fixture)
-- [x] STOP — revisión humana antes de fase 3
+- Conector database URL (Postgres + MySQL; Supabase = Postgres)
+  - Validación read-only al crear fuente (422 si tiene write)
+  - Credenciales cifradas AES-256-GCM (`enc:v1:...`)
+  - Introspección schema (information_schema + pg_catalog para PKs)
+  - Sync incremental por cursor + full sync; hash idempotente en raw
+- Conector CSV (`POST /sources/:id/upload`)
+- Profiling sobre raw + `GET /sources/:id/profile` + tabla `source_profiles`
+- Mapping Zod (`POST /sources/:id/mapping`) con validación contra perfil, versionado
+- Enriquecimiento LLM opcional en ingest + cache `record_enrichments`
+- Index pipeline: `source.index` + `embeddings.generate` (OpenRouter + mocks)
+  - `records.search_source` → `search_text` generado
+  - unique `(record_id, embedding_model, mapping_version)`
+- `POST /sources/:id/sync|index`, `GET /sources/:id/status`
+- Fixture ecommerce en docker-compose (`fixture-db:5433`, 300 productos, `readonly_user`)
+- Tests: 25 passing (unit + integration e2e con fixture)
+- STOP — revisión humana antes de fase 3
 
 ### Fase 3: Query engine (búsqueda híbrida + API de consulta)
 

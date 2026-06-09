@@ -40,6 +40,9 @@ export type ConnectionValidation = {
 export type StreamRowsOptions = {
   cursorColumn?: string;
   cursorValue?: string;
+  cursorTieBreakerColumn?: string;
+  cursorTieBreakerValue?: string;
+  orderBy?: string[];
   batchSize: number;
 };
 

@@ -11,6 +11,10 @@ export function createPool(connectionString: string): pg.Pool {
   return new pg.Pool({ connectionString });
 }
 
+export function createDbFromPool(targetPool: pg.Pool): Database {
+  return drizzle(targetPool, { schema });
+}
+
 export function createDb(connectionString: string): Database {
   pool = createPool(connectionString);
   return drizzle(pool, { schema });

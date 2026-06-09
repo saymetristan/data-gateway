@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { createDb, closeDb, runMigrations, apiKeys, type Database } from '@data-gateway/core';
+import {
+  createDb,
+  closeDb,
+  runMigrations,
+  apiKeys,
+  sourceProfiles,
+  type Database,
+} from '@data-gateway/core';
 import { createApp } from './app.js';
 import type { ApiEnv } from './env.js';
 
@@ -124,6 +131,113 @@ describe.runIf(hasDatabase)('API integration', () => {
     const body = (await res.json()) as { status: string; db: string };
     expect(body.status).toBe('ok');
     expect(body.db).toBe('connected');
+  });
+
+  it('phase 2 source endpoints return expected status codes', async () => {
+    const wsRes = await app.request('/workspaces', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Phase 2', slug: `phase-2-${Date.now()}` }),
+    });
+    expect(wsRes.status).toBe(201);
+    const workspace = (await wsRes.json()) as { id: string };
+
+    const keyRes = await app.request(`/workspaces/${workspace.id}/api-keys`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+    const { key } = (await keyRes.json()) as { key: string };
+
+    const sourceRes = await app.request('/sources', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ type: 'csv', name: 'P2 CSV', config: {} }),
+    });
+    expect(sourceRes.status).toBe(201);
+    const source = (await sourceRes.json()) as { id: string };
+
+    const missingProfile = await app.request(`/sources/${source.id}/profile`, {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    expect(missingProfile.status).toBe(404);
+
+    const indexWithoutMapping = await app.request(`/sources/${source.id}/index`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    expect(indexWithoutMapping.status).toBe(409);
+
+    await db.insert(sourceProfiles).values({
+      sourceId: source.id,
+      document: {
+        totalRecords: 1,
+        profiledAt: new Date().toISOString(),
+        tables: [
+          {
+            table: 'csv',
+            recordCount: 1,
+            columns: [
+              {
+                name: 'sku',
+                inferredType: 'string',
+                cardinality: 1,
+                nullCount: 0,
+                nullRate: 0,
+                topValues: [],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const profile = await app.request(`/sources/${source.id}/profile`, {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    expect(profile.status).toBe(200);
+
+    const invalidMapping = await app.request(`/sources/${source.id}/mapping`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        document: {
+          entities: [
+            {
+              entity: 'product',
+              sourceTable: 'csv',
+              fields: [
+                {
+                  name: 'missing',
+                  sourceColumn: 'missing',
+                  type: 'string',
+                  searchable: true,
+                  filterable: false,
+                  visible: true,
+                  sensitive: false,
+                },
+              ],
+              rules: [],
+              defaultFilters: [],
+              embeddingTextTemplate: '{{missing}}',
+            },
+          ],
+        },
+      }),
+    });
+    expect(invalidMapping.status).toBe(422);
   });
 });
 

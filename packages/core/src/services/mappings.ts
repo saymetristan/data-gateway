@@ -36,20 +36,22 @@ export async function createSourceMapping(
 
   const nextVersion = (latest?.version ?? 0) + 1;
 
-  await db
-    .update(mappings)
-    .set({ status: 'draft', updatedAt: new Date() })
-    .where(and(eq(mappings.sourceId, sourceId), eq(mappings.status, 'active')));
+  const [created] = await db.transaction(async (tx) => {
+    await tx
+      .update(mappings)
+      .set({ status: 'draft', updatedAt: new Date() })
+      .where(and(eq(mappings.sourceId, sourceId), eq(mappings.status, 'active')));
 
-  const [created] = await db
-    .insert(mappings)
-    .values({
-      sourceId,
-      version: nextVersion,
-      document: parsed,
-      status: 'active',
-    })
-    .returning();
+    return tx
+      .insert(mappings)
+      .values({
+        sourceId,
+        version: nextVersion,
+        document: parsed,
+        status: 'active',
+      })
+      .returning();
+  });
 
   if (!created) {
     throw GatewayError.internal('Failed to create mapping');
@@ -75,6 +77,24 @@ export async function getActiveMapping(db: Database, sourceId: string) {
 
   if (!mapping) {
     throw GatewayError.conflict('Active mapping not found for source');
+  }
+
+  return mapping;
+}
+
+export async function getMappingByVersion(
+  db: Database,
+  sourceId: string,
+  version: number,
+) {
+  const [mapping] = await db
+    .select()
+    .from(mappings)
+    .where(and(eq(mappings.sourceId, sourceId), eq(mappings.version, version)))
+    .limit(1);
+
+  if (!mapping) {
+    throw GatewayError.conflict(`Mapping version ${String(version)} not found for source`);
   }
 
   return mapping;

@@ -1,6 +1,7 @@
 import type PgBoss from 'pg-boss';
 import {
-  createDb,
+  createDbFromPool,
+  createPool,
   indexSource,
   generateEmbeddingsForRecords,
   SOURCE_INDEX_JOB,
@@ -20,8 +21,13 @@ export function registerIndexingJobs(boss: PgBoss, env: WorkerEnv): void {
     if (!job) return;
 
     const data = job.data as SourceIndexJobData;
-    const db = createDb(env.DATABASE_URL);
-    await indexSource(db, data.sourceId, data.workspaceId, env.DATABASE_URL, llmProvider);
+    const pool = createPool(env.DATABASE_URL);
+    const db = createDbFromPool(pool);
+    try {
+      await indexSource(db, data.sourceId, data.workspaceId, env.DATABASE_URL, llmProvider);
+    } finally {
+      await pool.end();
+    }
   });
 
   void boss.work(EMBEDDINGS_GENERATE_JOB, async (jobs) => {
@@ -29,13 +35,18 @@ export function registerIndexingJobs(boss: PgBoss, env: WorkerEnv): void {
     if (!job) return;
 
     const data = job.data as EmbeddingsGenerateJobData;
-    const db = createDb(env.DATABASE_URL);
-    await generateEmbeddingsForRecords(
-      db,
-      data.sourceId,
-      data.recordIds,
-      data.mappingVersion,
-      embeddingProvider,
-    );
+    const pool = createPool(env.DATABASE_URL);
+    const db = createDbFromPool(pool);
+    try {
+      await generateEmbeddingsForRecords(
+        db,
+        data.sourceId,
+        data.recordIds,
+        data.mappingVersion,
+        embeddingProvider,
+      );
+    } finally {
+      await pool.end();
+    }
   });
 }

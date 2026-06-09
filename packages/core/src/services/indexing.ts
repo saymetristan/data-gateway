@@ -24,7 +24,7 @@ import type { LlmProvider } from '../providers/llm.js';
 import { promptHash } from '../utils/hash.js';
 import { enqueueJob } from '../queue/boss.js';
 import { EMBEDDINGS_GENERATE_JOB } from '../queue/jobs.js';
-import { getActiveMapping } from './mappings.js';
+import { getActiveMapping, getMappingByVersion } from './mappings.js';
 
 const EMBEDDING_BATCH_SIZE = 50;
 
@@ -128,10 +128,12 @@ export async function indexSource(
     });
   }
 
-  await db
-    .update(sources)
-    .set({ maturityStatus: 'indexed', updatedAt: new Date() })
-    .where(eq(sources.id, sourceId));
+  if (indexed > 0) {
+    await db
+      .update(sources)
+      .set({ maturityStatus: 'indexed', updatedAt: new Date() })
+      .where(eq(sources.id, sourceId));
+  }
 
   return {
     indexed,
@@ -148,7 +150,7 @@ export async function generateEmbeddingsForRecords(
 ): Promise<number> {
   if (recordIds.length === 0) return 0;
 
-  const mapping = await getActiveMapping(db, sourceId);
+  const mapping = await getMappingByVersion(db, sourceId, mappingVersion);
   const document = mapping.document as MappingDocument;
   const entityMap = new Map(document.entities.map((entity) => [entity.entity, entity]));
 
@@ -244,13 +246,23 @@ async function enrichRecord(
     const schema = buildEnrichmentSchema(enrichment.outputFields);
     output = schema.parse(JSON.parse(jsonText));
 
-    await db.insert(recordEnrichments).values({
-      sourceId,
-      sourceRecordId,
-      payloadHash: payloadHashValue,
-      promptHash: hash,
-      output,
-    });
+    await db
+      .insert(recordEnrichments)
+      .values({
+        sourceId,
+        sourceRecordId,
+        payloadHash: payloadHashValue,
+        promptHash: hash,
+        output,
+      })
+      .onConflictDoNothing({
+        target: [
+          recordEnrichments.sourceId,
+          recordEnrichments.sourceRecordId,
+          recordEnrichments.payloadHash,
+          recordEnrichments.promptHash,
+        ],
+      });
   }
 
   return { ...data, ...output };

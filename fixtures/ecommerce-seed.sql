@@ -1,4 +1,4 @@
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS products (
   id SERIAL PRIMARY KEY,
   sku TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
@@ -39,7 +39,8 @@ BEGIN
       colors[1 + (i % array_length(colors, 1))],
       categories[1 + (i % array_length(categories, 1))],
       NOW() - ((i % 30) || ' days')::interval
-    );
+    )
+    ON CONFLICT (sku) DO NOTHING;
   END LOOP;
 END $$;
 
@@ -48,9 +49,17 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'readonly_user') THEN
     CREATE ROLE readonly_user LOGIN PASSWORD 'readonly_pass';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'write_user') THEN
+    CREATE ROLE write_user LOGIN PASSWORD 'write_pass';
+  END IF;
 END $$;
 
 GRANT CONNECT ON DATABASE catalog TO readonly_user;
 GRANT USAGE ON SCHEMA public TO readonly_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonly_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO readonly_user;
+
+GRANT CONNECT ON DATABASE catalog TO write_user;
+GRANT USAGE ON SCHEMA public TO write_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO write_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO write_user;
