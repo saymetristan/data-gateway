@@ -75,7 +75,9 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
           profile: source.profile,
         });
         extractedFilters.push(...extracted.filters);
-        unresolvedText = extracted.unresolvedText;
+        if (extracted.unresolvedText.length < unresolvedText.length) {
+          unresolvedText = extracted.unresolvedText;
+        }
         warnings.push(...extracted.warnings);
       }
     }
@@ -96,17 +98,23 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
       }
     }
 
+    const defaultFilters = collectDefaultFilters(queryable, entityFilter);
     const mergedFilters = mergeFilters(
       extractedFilters,
       requestFiltersToNormalized(input.request.filters),
-      collectDefaultFilters(queryable, entityFilter),
+      defaultFilters,
     );
 
     const filterableFields = collectFilterableFields(queryable, entityFilter);
-    for (const filter of mergedFilters) {
+    for (const filter of defaultFilters) {
       filterableFields.add(filter.field);
     }
-    appliedFilters = shapeAppliedFilters(mergedFilters, collectAllFields(queryable, entityFilter));
+    const safeFilters = mergedFilters.filter((filter) => {
+      if (filterableFields.has(filter.field)) return true;
+      warnings.push(`Filter on non-filterable field "${filter.field}" ignored`);
+      return false;
+    });
+    appliedFilters = shapeAppliedFilters(safeFilters, collectAllFields(queryable, entityFilter));
 
     const embeddingsAvailableBySource = await resolveEmbeddingsAvailability(
       input.db,
@@ -122,7 +130,7 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
       ...(entityFilter ? { entity: entityFilter } : {}),
       mappingVersionBySource,
       embeddingModel: input.embeddingProvider.model,
-      filters: mergedFilters,
+      filters: safeFilters,
       freeText: unresolvedText,
       limit: input.request.limit,
       filterableFields,
@@ -185,7 +193,7 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
       latencyMs: Date.now() - started,
       warnings,
       error: errorMessage,
-    });
+    }).catch(() => undefined);
     throw error;
   }
 }
@@ -339,25 +347,25 @@ function buildFieldMap(queryable: QueryableSource[]): Map<string, MappingEntity[
 
 /**
  * Default filters always win over request/extracted filters on the same field.
+ * Ranges on the same field are preserved by keying non-default filters by field+op.
  */
 function mergeFilters(
   extracted: NormalizedFilter[],
   requestFilters: NormalizedFilter[],
   defaults: NormalizedFilter[],
 ): NormalizedFilter[] {
-  const byField = new Map<string, NormalizedFilter>();
+  const byKey = new Map<string, NormalizedFilter>();
+  const defaultFields = new Set(defaults.map((filter) => filter.field));
 
-  for (const filter of extracted) {
-    byField.set(filter.field, filter);
-  }
-  for (const filter of requestFilters) {
-    byField.set(filter.field, filter);
+  for (const filter of [...extracted, ...requestFilters]) {
+    if (defaultFields.has(filter.field)) continue;
+    byKey.set(`${filter.field}:${filter.op}`, filter);
   }
   for (const filter of defaults) {
-    byField.set(filter.field, filter);
+    byKey.set(`${filter.field}:${filter.op}`, filter);
   }
 
-  return [...byField.values()];
+  return [...byKey.values()];
 }
 
 type QueryLogPayload = {

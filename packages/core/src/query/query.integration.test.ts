@@ -219,6 +219,75 @@ describe.runIf(hasFixture)('query integration', () => {
     });
   });
 
+  it('preserva ambos límites de rangos entre X y Y', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Between', slug: `bt-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      await bootstrapSource(db, testUrl, workspace.id);
+
+      const response = await executeQuery({
+        db,
+        workspaceId: workspace.id,
+        request: { query: 'entre 50 y 55', limit: 50 },
+        embeddingProvider: new MockEmbeddingProvider(1024),
+      });
+
+      expect(response.query_type).toBe('filter_only');
+      expect(response.applied_filters).toContainEqual({ field: 'price', op: 'gte', value: 50 });
+      expect(response.applied_filters).toContainEqual({ field: 'price', op: 'lte', value: 55 });
+      for (const result of response.results) {
+        const price = Number(result.data.price);
+        expect(price).toBeGreaterThanOrEqual(50);
+        expect(price).toBeLessThanOrEqual(55);
+      }
+    });
+  });
+
+  it('ignora filtros del request sobre campos no-filterable/sensitive', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Unsafe Filter', slug: `uf-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      await bootstrapSource(db, testUrl, workspace.id);
+
+      const baseline = await executeQuery({
+        db,
+        workspaceId: workspace.id,
+        request: { query: 'SKU-00042', limit: 5 },
+        embeddingProvider: new MockEmbeddingProvider(1024),
+      });
+      const probed = await executeQuery({
+        db,
+        workspaceId: workspace.id,
+        request: {
+          query: 'SKU-00042',
+          filters: { cost: 52.99, description: 'Descripcion del producto 42 para catalogo ecommerce en español.' },
+          limit: 5,
+        },
+        embeddingProvider: new MockEmbeddingProvider(1024),
+      });
+
+      expect(probed.results.map((result) => result.id)).toEqual(
+        baseline.results.map((result) => result.id),
+      );
+      expect(probed.applied_filters.some((filter) => filter.field === 'cost')).toBe(false);
+      expect(probed.applied_filters.some((filter) => filter.field === 'description')).toBe(false);
+      expect(
+        probed.warnings.some((warning) => warning.includes('non-filterable field "cost"')),
+      ).toBe(true);
+      expect(
+        probed.warnings.some((warning) => warning.includes('non-filterable field "description"')),
+      ).toBe(true);
+    });
+  });
+
   it('fuente sin embeddings degrada a lexical con warning', async () => {
     await withTestDatabase(async (db, testUrl) => {
       const [workspace] = await db
