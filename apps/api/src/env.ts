@@ -14,6 +14,14 @@ export const apiEnvSchema = z.object({
   ADMIN_API_KEY: z.string().min(16),
   CREDENTIALS_ENCRYPTION_KEY: encryptionKeySchema,
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  OPENROUTER_API_KEY: z.string().optional(),
+  EMBEDDING_MODEL: z.string().default('qwen/qwen3-embedding-8b'),
+  EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(1024),
+  LLM_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b:free'),
+  USE_MOCK_PROVIDERS: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => value === 'true'),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

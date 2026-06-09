@@ -6,6 +6,8 @@ import {
   runMigrations,
   apiKeys,
   sourceProfiles,
+  MockEmbeddingProvider,
+  MockLlmProvider,
   type Database,
 } from '@data-gateway/core';
 import { createApp } from './app.js';
@@ -34,12 +36,55 @@ describe.runIf(hasDatabase)('API integration', () => {
       ADMIN_API_KEY: adminKey,
       CREDENTIALS_ENCRYPTION_KEY: ENCRYPTION_KEY,
       NODE_ENV: 'test',
+      EMBEDDING_MODEL: 'mock-embedding',
+      EMBEDDING_DIMENSIONS: 1024,
+      LLM_MODEL: 'mock-llm',
+      USE_MOCK_PROVIDERS: true,
     };
-    app = createApp({ env, db });
+    app = createApp({
+      env,
+      db,
+      embeddingProvider: new MockEmbeddingProvider(1024),
+      llmProvider: new MockLlmProvider(),
+    });
   });
 
   it('returns 401 without workspace API key on /sources', async () => {
     const res = await app.request('/sources', { method: 'POST' });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 on /query when API key lacks query:execute scope', async () => {
+    const wsRes = await app.request('/workspaces', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Query Scope', slug: `query-scope-${Date.now()}` }),
+    });
+    expect(wsRes.status).toBe(201);
+    const workspace = (await wsRes.json()) as { id: string };
+
+    const keyRes = await app.request(`/workspaces/${workspace.id}/api-keys`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ scopes: ['sources:read'] }),
+    });
+    expect(keyRes.status).toBe(201);
+    const { key } = (await keyRes.json()) as { key: string };
+
+    const res = await app.request('/query', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query: 'camiseta roja' }),
+    });
     expect(res.status).toBe(401);
   });
 

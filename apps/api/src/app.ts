@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { Database } from '@data-gateway/core';
+import type { Database, EmbeddingProvider, LlmProvider } from '@data-gateway/core';
 import { GatewayError, gatewayErrorToHttp, pingDb } from '@data-gateway/core';
 import type { ApiEnv } from './env.js';
 import { requestLogger } from './middleware/common.js';
@@ -7,6 +7,7 @@ import { adminAuth, workspaceAuth } from './middleware/auth.js';
 import { healthRoutes } from './routes/health.js';
 import { workspaceRoutes } from './routes/workspaces.js';
 import { sourceRoutes } from './routes/sources.js';
+import { queryRoutes } from './routes/query.js';
 
 export type AppVariables = {
   db: Database;
@@ -18,6 +19,8 @@ export type AppVariables = {
 export type AppBindings = {
   env: ApiEnv;
   db: Database;
+  embeddingProvider: EmbeddingProvider;
+  llmProvider: LlmProvider;
 };
 
 export function createApp(deps: AppBindings) {
@@ -50,6 +53,10 @@ export function createApp(deps: AppBindings) {
   app.use('/sources', workspaceAuth());
   app.use('/sources/*', workspaceAuth());
   app.route('/sources', sourceRoutes(deps));
+
+  app.use('/query', workspaceAuth());
+  app.use('/query/*', workspaceAuth());
+  app.route('/query', queryRoutes(deps));
 
   return app;
 }

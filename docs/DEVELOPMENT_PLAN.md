@@ -88,25 +88,26 @@ El workspace ya quedó configurado vía `project-setup` + yuntro; nada de esto s
 - Tests: 25 passing (unit + integration e2e con fixture)
 - STOP — revisión humana antes de fase 3
 
-### Fase 3: Query engine (búsqueda híbrida + API de consulta)
+### Fase 3: Query engine (búsqueda híbrida + API de consulta) — COMPLETADA
 
-- Extractor determinístico de filtros
-  - Números/rangos por regex ("menos de 1500" → `price_lte: 1500`)
-  - Enums por match contra valores reales del profiling (talla, color, use_case)
-  - Fallback LLM solo para slots no resueltos, con salida validada por Zod contra los campos filtrables del mapping (nunca SQL, nunca campos fuera del mapping)
-- Motor de retrieval
-  - Filtros estructurados sobre `data` JSONB (solo campos `filterable`; default filters del mapping siempre aplicados)
-  - Búsqueda lexical (`tsvector` config `spanish` + `unaccent`, `pg_trgm` para SKUs/typos); nota: `ts_rank` no es BM25, pero RRF solo necesita el orden — si los evals muestran debilidad lexical, el upgrade path es BM25 real (ParadeDB `pg_search`) o reranker
-  - Búsqueda vectorial (pgvector HNSW) restringida por los mismos filtros
-  - Fusión RRF de ambos rankings
-- Confidence determinístico: gap entre top scores, % de filtros solicitados que se aplicaron, overlap lexical; documentar la fórmula
-- `POST /query` según el contrato del documento de partida (sección 24)
-  - Response con `results`, `applied_filters`, `query_type`, `confidence`, `sources_used`, `warnings`
-  - Filtrado de campos `sensitive`/`visible: false` en la respuesta (nunca salen del Gateway)
-- Logging completo por consulta en `query_logs` (query original, filtros extraídos, tipo, latencia, resultados)
-- Tests: extractor de filtros (casos reales en español), RRF, exclusión de campos sensibles, default filters siempre aplicados
-- Realizar auto-revisión del código; marcar como hecho solo cuando la fase cumpla el 100% de los requisitos
-- STOP y esperar revisión humana
+- Extractor determinístico de filtros (`packages/core/src/query/extract-filters.ts`)
+  - Números/rangos por regex en español (`menos de`, `entre X y Y`, formatos `$1,500` / `1.500`)
+  - Enums por match contra `topValues` del profiling (color, talla, categoría)
+  - Booleanos (`disponible`, `en stock`, `agotado`)
+  - Fallback LLM opcional (`useLlmFallback`) validado con Zod dinámico contra mapping; query-path funciona sin LLM
+- Motor híbrido (`retrieval.ts` + `rrf.ts`, k=60)
+  - Filtros JSONB parametrizados; default filters del mapping siempre ganan sobre request
+  - Lexical: `websearch_to_tsquery('es_unaccent', f_unaccent(...))` + `pg_trgm` para SKUs cortos
+  - Vector: HNSW cosine con `embedding_model` + `mapping_version` activos
+  - Degradación a `lexical` si no hay embeddings; `filter_only` si no queda texto libre
+- Confidence determinístico (`confidence.ts`): blend lineal de gap RRF, cobertura de filtros, overlap lexical, fill ratio
+- `POST /query` con scope `query:execute` (legacy keys sin scopes siguen permitidas)
+  - Response: `results`, `applied_filters`, `query_type`, `confidence`, `sources_used`, `warnings`
+  - Shaping: campos `sensitive` / `visible:false` nunca salen (ni en `applied_filters`)
+- Providers de embeddings/LLM en API (`apps/api/src/providers.ts`); env alineado con worker
+- Logging en `query_logs` (primer writer): raw, structured, tipo, filtros, latencia, confidence, error
+- Tests: 65 passing (unit extractor/RRF/confidence/shaping/LLM + integration E2E fixture + scope API)
+- STOP — revisión humana antes de fase 4
 
 ### Fase 4: Evals como gate de activación
 

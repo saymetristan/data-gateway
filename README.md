@@ -84,3 +84,63 @@ curl -X POST http://localhost:3000/sources/{source_id}/upload \
 ```bash
 curl http://localhost:3000/health
 ```
+
+## Query (`POST /query`)
+
+Requiere fuente con `maturityStatus >= indexed`, mapping activo y scope `query:execute` (keys legacy sin scopes = permitido).
+
+```bash
+curl -X POST http://localhost:3000/query \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "camiseta rojo menos de 100",
+    "limit": 10
+  }'
+```
+
+**Request** (`queryRequestSchema`):
+
+| Campo | Tipo | Notas |
+|-------|------|-------|
+| `query` | string | Obligatorio |
+| `entity` | string? | Filtra entidad del mapping |
+| `sourceId` | uuid? | Limita a una fuente |
+| `filters` | record? | Filtros explícitos (no pueden anular `defaultFilters`) |
+| `limit` | int | Default 10, max 50 |
+| `useLlmFallback` | bool | Default false |
+
+`workspace_id` sale de la API key, no va en el body.
+
+**Response**:
+
+```json
+{
+  "results": [{ "id": "...", "entity": "product", "score": 0.03, "data": { } }],
+  "applied_filters": [{ "field": "price", "op": "lt", "value": 100 }],
+  "query_type": "hybrid_search",
+  "confidence": 0.72,
+  "sources_used": ["..."],
+  "warnings": []
+}
+```
+
+`query_type`: `filter_only` | `lexical` | `hybrid_search`
+
+### Confidence (determinístico, sin LLM)
+
+```
+confidence = 0.35·scoreGap + 0.25·filterCoverage + 0.25·lexicalOverlap + 0.15·resultFill
+```
+
+- **scoreGap**: gap relativo entre score RRF #1 y #2
+- **filterCoverage**: filtros aplicados / filtros pedidos (1 si no hubo filtros)
+- **lexicalOverlap**: 1 si el top result matcheó el tsquery
+- **resultFill**: `min(1, results.length / limit)`
+
+### Fallbacks
+
+- Sin embeddings para la fuente → `lexical` + warning
+- Embedding provider falla → `lexical` + warning (no 500)
+- Sin LLM o `useLlmFallback: false` → solo extractor determinístico
+- LLM devuelve campos inválidos → descartados con warning
