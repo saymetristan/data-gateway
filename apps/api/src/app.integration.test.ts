@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { createDb, closeDb, runMigrations } from '@data-gateway/core';
+import { eq } from 'drizzle-orm';
+import { createDb, closeDb, runMigrations, apiKeys, type Database } from '@data-gateway/core';
 import { createApp } from './app.js';
 import type { ApiEnv } from './env.js';
 
@@ -10,10 +11,11 @@ const DATABASE_URL =
 describe.runIf(hasDatabase)('API integration', () => {
   const adminKey = 'dgw_admin_test_key_1234567890';
   let app: ReturnType<typeof createApp>;
+  let db: Database;
 
   beforeAll(async () => {
     await runMigrations(DATABASE_URL);
-    const db = createDb(DATABASE_URL);
+    db = createDb(DATABASE_URL);
     const env: ApiEnv = {
       DATABASE_URL,
       PORT: 3000,
@@ -74,6 +76,40 @@ describe.runIf(hasDatabase)('API integration', () => {
       body: JSON.stringify({ type: 'csv', name: 'X', config: {} }),
     });
     expect(wrongKeyRes.status).toBe(401);
+  });
+
+  it('returns 401 with a revoked API key', async () => {
+    const wsRes = await app.request('/workspaces', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Revoked', slug: `revoked-${Date.now()}` }),
+    });
+    const workspace = (await wsRes.json()) as { id: string };
+
+    const keyRes = await app.request(`/workspaces/${workspace.id}/api-keys`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+    const { id: keyId, key } = (await keyRes.json()) as { id: string; key: string };
+
+    await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, keyId));
+
+    const res = await app.request('/sources', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ type: 'csv', name: 'X', config: {} }),
+    });
+    expect(res.status).toBe(401);
   });
 
   it('health check responds', async () => {
