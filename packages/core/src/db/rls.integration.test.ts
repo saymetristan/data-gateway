@@ -1,11 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { records, sources, workspaces } from './schema/index.js';
-import { withWorkspaceContext } from './rls.js';
+import { withWorkspaceContext, workspaceRlsRoleExists } from './rls.js';
 import { withTestDatabase } from '../test/db-helper.js';
 
 const hasDatabase = process.env.RUN_INTEGRATION_TESTS === 'true' || process.env.CI === 'true';
 
 describe.runIf(hasDatabase)('rls integration', () => {
+  it('installs the gateway_app role used for RLS enforcement', async () => {
+    await withTestDatabase(async (db) => {
+      await expect(workspaceRlsRoleExists(db)).resolves.toBe(true);
+    });
+  });
+
   it('filters tenant rows when workspace context is set', async () => {
     await withTestDatabase(async (db) => {
       const [wsA] = await db.insert(workspaces).values({ name: 'A', slug: `rls-a-${Date.now()}`, settings: {} }).returning();

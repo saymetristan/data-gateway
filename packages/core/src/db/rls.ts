@@ -5,9 +5,18 @@ export const WORKSPACE_CONTEXT_KEY = 'app.workspace_id';
 export const WORKSPACE_RLS_ROLE = 'gateway_app';
 
 export async function setWorkspaceContext(db: Database, workspaceId: string): Promise<void> {
-  // postgres en dev tiene BYPASSRLS; gateway_app sí respeta las policies.
-  await db.execute(sql`SET LOCAL ROLE ${sql.raw(WORKSPACE_RLS_ROLE)}`);
+  if (await workspaceRlsRoleExists(db)) {
+    // postgres en dev tiene BYPASSRLS; gateway_app sí respeta las policies.
+    await db.execute(sql`SET LOCAL ROLE ${sql.raw(WORKSPACE_RLS_ROLE)}`);
+  }
   await db.execute(sql`SELECT set_config('app.workspace_id', ${workspaceId}::text, true)`);
+}
+
+export async function workspaceRlsRoleExists(db: Database): Promise<boolean> {
+  const result = await db.execute<{ exists: boolean }>(
+    sql`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${WORKSPACE_RLS_ROLE}) AS exists`,
+  );
+  return result.rows[0]?.exists ?? false;
 }
 
 export async function withWorkspaceContext<T>(
