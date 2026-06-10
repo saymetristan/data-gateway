@@ -1,6 +1,6 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
-import { sources } from '../db/schema/index.js';
+import { mappings, sources } from '../db/schema/index.js';
 import type { ShopifyClient } from '../connectors/shopify/types.js';
 import {
   collectionToRawPayload,
@@ -13,7 +13,6 @@ import { enqueueJob } from '../queue/boss.js';
 import { SOURCE_INDEX_JOB, SOURCE_PROFILE_JOB } from '../queue/jobs.js';
 import { getDecryptedSourceConfig, updateSourceConfig } from './sources.js';
 import { deleteRawRecords, removeStaleRawRecords, upsertRawRecord } from './raw-records.js';
-import { getActiveMapping } from './mappings.js';
 
 const WEBHOOK_TOPICS = [
   'products/create',
@@ -164,20 +163,23 @@ async function enqueuePostSyncJob(
   workspaceId: string,
   connectionString: string,
 ): Promise<void> {
-  try {
-    await getActiveMapping(db, sourceId);
+  const [activeMapping] = await db
+    .select({ id: mappings.id })
+    .from(mappings)
+    .where(and(eq(mappings.sourceId, sourceId), eq(mappings.status, 'active')))
+    .orderBy(desc(mappings.version))
+    .limit(1);
+
+  if (activeMapping) {
     await enqueueJob(connectionString, SOURCE_INDEX_JOB, {
       sourceId,
       workspaceId,
       invalidateMaturity: false,
     });
-  } catch (error) {
-    if (error instanceof GatewayError && error.code === 'not_found') {
-      await enqueueJob(connectionString, SOURCE_PROFILE_JOB, { sourceId, workspaceId });
-      return;
-    }
-    throw error;
+    return;
   }
+
+  await enqueueJob(connectionString, SOURCE_PROFILE_JOB, { sourceId, workspaceId });
 }
 
 export async function findShopifySourceByDomain(
