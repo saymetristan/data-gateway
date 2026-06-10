@@ -8,6 +8,8 @@ const env = loadWorkerEnv();
 const boss = new PgBoss({
   connectionString: env.DATABASE_URL,
   schema: 'pgboss',
+  // Supabase session pooler: 15 conexiones totales entre api y worker.
+  max: 5,
 });
 
 let shuttingDown = false;

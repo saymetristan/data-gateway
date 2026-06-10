@@ -7,6 +7,8 @@ export async function getQueue(connectionString: string): Promise<PgBoss> {
     bossInstance = new PgBoss({
       connectionString,
       schema: 'pgboss',
+      // Solo encola jobs desde la API; pool mínimo para no agotar el session pooler.
+      max: 2,
     });
     await bossInstance.start();
   }

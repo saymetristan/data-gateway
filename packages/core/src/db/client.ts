@@ -7,8 +7,12 @@ export type Database = NodePgDatabase<typeof schema>;
 
 let pool: pg.Pool | undefined;
 
+// Supabase session pooler limita a 15 conexiones totales; mantener pools chicos.
+const DEFAULT_POOL_MAX = 5;
+
 export function createPool(connectionString: string): pg.Pool {
-  return new pg.Pool({ connectionString });
+  const max = Number(process.env.DATABASE_POOL_MAX ?? DEFAULT_POOL_MAX);
+  return new pg.Pool({ connectionString, max });
 }
 
 export function createDbFromPool(targetPool: pg.Pool): Database {
