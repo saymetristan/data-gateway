@@ -40,6 +40,10 @@ export function sourceRoutes(deps: AppBindings) {
       parsed.data,
       deps.env.CREDENTIALS_ENCRYPTION_KEY,
       deps.env.DATABASE_URL,
+      {
+        ...(deps.env.PUBLIC_API_URL ? { publicApiUrl: deps.env.PUBLIC_API_URL } : {}),
+        ...(deps.env.USE_MOCK_PROVIDERS ? { useMockProviders: true } : {}),
+      },
     );
 
     return c.json(
@@ -62,14 +66,14 @@ export function sourceRoutes(deps: AppBindings) {
     const sourceId = sourceIdParam(c.req.param('id'));
     const source = await getSourceForWorkspace(db, workspaceId, sourceId);
 
-    if (source.type !== 'database_url') {
-      throw GatewayError.validation('Sync is only supported for database_url sources');
+    if (source.type !== 'database_url' && source.type !== 'shopify') {
+      throw GatewayError.validation('Sync is only supported for database_url and shopify sources');
     }
 
     const jobId = await enqueueJob(deps.env.DATABASE_URL, SOURCE_SYNC_JOB, {
       sourceId: source.id,
       workspaceId,
-      fullSync: true,
+      fullSync: source.type === 'shopify' ? false : true,
     });
 
     return c.json({ jobId, status: 'queued' }, 202);

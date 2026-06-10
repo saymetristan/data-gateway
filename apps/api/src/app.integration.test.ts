@@ -6,6 +6,10 @@ import {
   runMigrations,
   apiKeys,
   sourceProfiles,
+  sources,
+  workspaces,
+  encryptSourceConfig,
+  computeShopifyHmac,
   MockEmbeddingProvider,
   MockLlmProvider,
   type Database,
@@ -317,6 +321,60 @@ describe.runIf(hasDatabase)('API integration', () => {
       }),
     });
     expect(invalidMapping.status).toBe(422);
+  });
+
+  it('webhook shopify rechaza HMAC inválido y acepta válido', async () => {
+    const [workspace] = await db
+      .insert(workspaces)
+      .values({ name: 'Webhook WS', slug: `wh-${Date.now()}`, settings: {} })
+      .returning();
+    if (!workspace) throw new Error('workspace missing');
+
+    const encryptedConfig = encryptSourceConfig(
+      'shopify',
+      {
+        shopDomain: 'hook-shop.myshopify.com',
+        accessToken: 'shpat_hook',
+        webhookSecret: 'hook-secret',
+      },
+      ENCRYPTION_KEY,
+    );
+
+    await db.insert(sources).values({
+      workspaceId: workspace.id,
+      type: 'shopify',
+      name: 'Hook Shop',
+      config: encryptedConfig,
+      maturityStatus: 'connected',
+    });
+
+    const payload = JSON.stringify({ id: 1 });
+    const bad = await app.request('/webhooks/shopify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Shop-Domain': 'hook-shop.myshopify.com',
+        'X-Shopify-Topic': 'products/update',
+        'X-Shopify-Hmac-Sha256': 'invalid',
+        'X-Shopify-Webhook-Id': `wh-bad-${Date.now()}`,
+      },
+      body: payload,
+    });
+    expect(bad.status).toBe(401);
+
+    const hmac = computeShopifyHmac(payload, 'hook-secret');
+    const ok = await app.request('/webhooks/shopify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Shop-Domain': 'hook-shop.myshopify.com',
+        'X-Shopify-Topic': 'products/update',
+        'X-Shopify-Hmac-Sha256': hmac,
+        'X-Shopify-Webhook-Id': `wh-ok-${Date.now()}`,
+      },
+      body: payload,
+    });
+    expect(ok.status).toBe(200);
   });
 });
 

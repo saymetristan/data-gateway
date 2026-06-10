@@ -30,13 +30,19 @@ import { maybeTransitionSourceMaturity } from './maturity.js';
 const EMBEDDING_BATCH_SIZE = 50;
 const RAW_BATCH_SIZE = 500;
 
+export type IndexSourceOptions = {
+  invalidateMaturity?: boolean;
+};
+
 export async function indexSource(
   db: Database,
   sourceId: string,
   workspaceId: string,
   connectionString: string,
   llmProvider: LlmProvider,
+  options: IndexSourceOptions = {},
 ): Promise<{ indexed: number; embeddingJobs: number }> {
+  const invalidateMaturity = options.invalidateMaturity ?? true;
   const [source] = await db.select().from(sources).where(eq(sources.id, sourceId)).limit(1);
   if (!source) {
     throw GatewayError.notFound('Source not found');
@@ -144,11 +150,12 @@ export async function indexSource(
     });
   }
 
-  // Re-index invalidates validated/agent_ready even when no records changed.
-  await maybeTransitionSourceMaturity(db, sourceId, 'indexed', 'source_reindexed', [
-    'validated',
-    'agent_ready',
-  ]);
+  if (invalidateMaturity) {
+    await maybeTransitionSourceMaturity(db, sourceId, 'indexed', 'source_reindexed', [
+      'validated',
+      'agent_ready',
+    ]);
+  }
 
   if (indexed > 0) {
     await maybeTransitionSourceMaturity(db, sourceId, 'indexed', 'source_indexed', ['mapped']);

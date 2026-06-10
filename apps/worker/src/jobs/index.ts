@@ -5,6 +5,11 @@ import { registerSyncJobs } from './sync.js';
 import { registerProfileJobs } from './profile.js';
 import { registerIndexingJobs } from './indexing.js';
 import { registerEvalJobs } from './evals.js';
+import { registerShopifyWebhookJobs } from './shopify-webhooks.js';
+import {
+  registerShopifyScheduledJobs,
+  scheduleShopifySyncJobs,
+} from './shopify-scheduled.js';
 
 export function registerJobs(boss: PgBoss, env: WorkerEnv): void {
   registerHealthJobs(boss);
@@ -12,8 +17,11 @@ export function registerJobs(boss: PgBoss, env: WorkerEnv): void {
   registerProfileJobs(boss, env);
   registerIndexingJobs(boss, env);
   registerEvalJobs(boss, env);
+  registerShopifyWebhookJobs(boss, env);
+  registerShopifyScheduledJobs(boss, env);
 }
 
 export async function scheduleJobs(boss: PgBoss): Promise<void> {
   await scheduleHealthJobs(boss);
+  await scheduleShopifySyncJobs(boss);
 }

@@ -24,7 +24,9 @@ export function registerIndexingJobs(boss: PgBoss, env: WorkerEnv): void {
     const pool = createPool(env.DATABASE_URL);
     const db = createDbFromPool(pool);
     try {
-      await indexSource(db, data.sourceId, data.workspaceId, env.DATABASE_URL, llmProvider);
+      await indexSource(db, data.sourceId, data.workspaceId, env.DATABASE_URL, llmProvider, {
+        invalidateMaturity: data.invalidateMaturity ?? true,
+      });
     } finally {
       await pool.end();
     }

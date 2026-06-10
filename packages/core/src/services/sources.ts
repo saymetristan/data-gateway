@@ -3,6 +3,9 @@ import type { Database } from '../db/client.js';
 import { sourceRecordsRaw, sources } from '../db/schema/index.js';
 import { decryptSourceConfig, encryptSourceConfig } from '../crypto/credentials.js';
 import { createDatabaseConnector } from '../connectors/factory.js';
+import { createShopifyClient } from '../connectors/shopify/client.js';
+import { createMockShopifyClient } from '../connectors/shopify/mock.js';
+import { registerShopifyWebhooks } from './shopify-sync.js';
 import { GatewayError } from '../errors/gateway-error.js';
 import type { CreateSourceInput } from '../schemas/index.js';
 import { enqueueJob } from '../queue/boss.js';
@@ -14,6 +17,7 @@ export async function createSourceWithValidation(
   input: CreateSourceInput,
   encryptionKey: string,
   connectionString: string,
+  options: { publicApiUrl?: string; useMockProviders?: boolean } = {},
 ) {
   if (input.type === 'database_url') {
     const connector = createDatabaseConnector(input.config.connectionUrl);
@@ -32,6 +36,27 @@ export async function createSourceWithValidation(
       }
     } finally {
       await connector.close();
+    }
+  }
+
+  if (input.type === 'shopify') {
+    const client = options.useMockProviders
+      ? createMockShopifyClient()
+      : createShopifyClient({
+          shopDomain: input.config.shopDomain,
+          accessToken: input.config.accessToken,
+          ...(input.config.apiVersion ? { apiVersion: input.config.apiVersion } : {}),
+        });
+    try {
+      const validation = await client.validateConnection();
+      if (!validation.ok) {
+        throw GatewayError.unprocessable(
+          'Shopify connection failed',
+          validation.message,
+        );
+      }
+    } finally {
+      await client.close();
     }
   }
 
@@ -56,13 +81,31 @@ export async function createSourceWithValidation(
     throw GatewayError.internal('Failed to create source');
   }
 
-  if (input.type === 'database_url') {
+  if (input.type === 'database_url' || input.type === 'shopify') {
     try {
       await enqueueJob(connectionString, SOURCE_SYNC_JOB, {
         sourceId: source.id,
         workspaceId,
         fullSync: true,
       });
+
+      if (
+        input.type === 'shopify' &&
+        input.config.webhookSecret &&
+        options.publicApiUrl &&
+        !options.useMockProviders
+      ) {
+        const client = createShopifyClient({
+          shopDomain: input.config.shopDomain,
+          accessToken: input.config.accessToken,
+          ...(input.config.apiVersion ? { apiVersion: input.config.apiVersion } : {}),
+        });
+        try {
+          await registerShopifyWebhooks(client, options.publicApiUrl);
+        } finally {
+          await client.close();
+        }
+      }
     } catch (error) {
       await db.delete(sources).where(eq(sources.id, source.id));
       throw error;

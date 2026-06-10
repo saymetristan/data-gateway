@@ -122,19 +122,19 @@ El workspace ya quedó configurado vía `project-setup` + yuntro; nada de esto s
 - Tests: unit métricas/state machine/schemas + integration E2E (run, gate, re-index invalida, scope API)
 - STOP — revisión humana antes de fase 5
 
-### Fase 5: Segundo dominio — conector Shopify (validación de la abstracción)
+### Fase 5: Segundo dominio — conector Shopify (validación de la abstracción) — COMPLETADA
 
-- Conector Shopify
-  - Auth por access token de custom app (OAuth público queda fuera de alcance inicial)
-  - Full sync de productos, variantes, inventario y colecciones → `source_records_raw`
-  - Webhooks (`products/update`, `inventory_levels/update`) + sync programado de respaldo
-- Mapping de Shopify (producto/variante/inventario) usando el mismo formato de mapping sin cambios al core
-- Reglas default de ecommerce (`available = status active + stock > 0`, ocultar costo interno)
-- Eval set de ecommerce (≥15 casos: búsqueda, disponibilidad por talla, precio)
-- **Checkpoint de abstracción**: documentar qué hacks fueron necesarios para que el core soportara el segundo dominio; si los hay, corregir el core ahora
-- Tests: idempotencia de webhooks, sync incremental, mapping de variantes
-- Realizar auto-revisión del código; marcar como hecho solo cuando la fase cumpla el 100% de los requisitos
-- STOP y esperar revisión humana
+- Conector Shopify (GraphQL Admin API + `MockShopifyClient` determinístico para CI)
+  - Auth por access token de custom app; validación al crear fuente
+  - Full/incremental sync de productos, variantes y colecciones → `source_records_raw` (`products:{id}`, `variants:{id}`)
+  - Variantes denormalizadas con datos del producto padre para query sin joins
+- Webhooks `POST /webhooks/shopify` con HMAC + job `shopify.webhook`; topics: create/update/delete product, inventory_levels/update
+- Sync programado de respaldo cada 6h (`shopify.sync.scheduled`)
+- Mapping fixture `fixtures/shopify-mapping.json` (entidad `variant`, regla `available` compuesta, `cost` sensitive)
+- Eval set `fixtures/shopify-evals.json` (18 casos)
+- **Checkpoint de abstracción** (`docs/ABSTRACTION_CHECKPOINT.md`): `indexSource({ invalidateMaturity })`, rules `conditions[]`, dispatcher `syncSource()`
+- Tests: unit HMAC/transform/dedupe/rules + integration E2E, incremental, webhooks, API HMAC
+- STOP — revisión humana antes de fase 6
 
 ### Fase 6: Tool compiler + capa MCP
 

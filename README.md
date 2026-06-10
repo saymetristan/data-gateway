@@ -207,3 +207,38 @@ curl -X POST http://localhost:3000/sources/{source_id}/activate \
 Si `GET /evals/runs/:id` devuelve un run `running` con `stale: true`, el worker probablemente murió o perdió el job después de tomarlo. Re-encola el run o crea uno nuevo; `runEvalSet` es idempotente y no reprocesa runs que ya no están en `running`.
 
 Fixture: `fixtures/ecommerce-evals.json` (24 cases para el catálogo de prueba).
+
+## Shopify (Fase 5)
+
+Custom app token (no OAuth público). Scopes: `read_products`, `read_inventory`.
+
+```bash
+# Crear fuente Shopify
+curl -X POST http://localhost:3000/sources \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY" \
+  -d '{
+    "type": "shopify",
+    "name": "Mi tienda",
+    "config": {
+      "shopDomain": "mi-tienda.myshopify.com",
+      "accessToken": "shpat_...",
+      "webhookSecret": "whsec_..."
+    }
+  }'
+
+# Sync manual (incremental)
+curl -X POST http://localhost:3000/sources/{source_id}/sync \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY"
+```
+
+- Sync inicial automático al crear (full sync → profile)
+- Webhooks en `POST /webhooks/shopify` (HMAC con `webhookSecret`; requiere `PUBLIC_API_URL` para registro automático)
+- Variantes indexadas como entidad `variant` (`fixtures/shopify-mapping.json`)
+- `available = status active AND inventoryQuantity > 0` vía rules `conditions[]`
+- Re-index por webhook **no** demota `agent_ready` (`invalidateMaturity: false`)
+- CI usa `MockShopifyClient` (~60 productos determinísticos)
+
+Env API adicional: `PUBLIC_API_URL` (URL pública para callback de webhooks).
+
+Fixtures: `fixtures/shopify-mapping.json`, `fixtures/shopify-evals.json` (18 cases).
+Checkpoint: `docs/ABSTRACTION_CHECKPOINT.md`.

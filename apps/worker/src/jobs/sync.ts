@@ -2,7 +2,7 @@ import type PgBoss from 'pg-boss';
 import {
   createDbFromPool,
   createPool,
-  syncDatabaseSource,
+  syncSource,
   SOURCE_SYNC_JOB,
   type SourceSyncJobData,
 } from '@data-gateway/core';
@@ -18,13 +18,16 @@ export function registerSyncJobs(boss: PgBoss, env: WorkerEnv): void {
     const db = createDbFromPool(pool);
 
     try {
-      await syncDatabaseSource(
+      await syncSource(
         db,
         data.sourceId,
         data.workspaceId,
         env.CREDENTIALS_ENCRYPTION_KEY,
         env.DATABASE_URL,
-        { fullSync: data.fullSync ?? false },
+        {
+          fullSync: data.fullSync ?? false,
+          useMockProviders: env.USE_MOCK_PROVIDERS,
+        },
       );
     } finally {
       await pool.end();

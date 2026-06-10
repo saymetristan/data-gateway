@@ -39,6 +39,20 @@ describe('mapping apply', () => {
     expect(buildSearchSource(withRules, fields)).toBe('Camiseta');
   });
 
+  it('aplica reglas compuestas con conditions AND', () => {
+    const payload = { status: 'active', inventoryQuantity: 4 };
+    const result = applyRules({}, payload, [
+      {
+        field: 'available',
+        conditions: [
+          { column: 'status', op: 'eq', value: 'active' },
+          { column: 'inventoryQuantity', op: 'gt', value: 0 },
+        ],
+      },
+    ]);
+    expect(result.available).toBe(true);
+  });
+
   it('renders embedding template', () => {
     const text = renderTemplate('{{name}} - {{sku}}', { name: 'A', sku: 'SKU-1' }, [
       'name',

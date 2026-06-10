@@ -9,6 +9,7 @@ import { workspaceRoutes } from './routes/workspaces.js';
 import { sourceRoutes } from './routes/sources.js';
 import { queryRoutes } from './routes/query.js';
 import { evalRoutes } from './routes/evals.js';
+import { webhookRoutes } from './routes/webhooks.js';
 
 export type AppVariables = {
   db: Database;
@@ -62,6 +63,8 @@ export function createApp(deps: AppBindings) {
   app.use('/evals', workspaceAuth());
   app.use('/evals/*', workspaceAuth());
   app.route('/evals', evalRoutes(deps));
+
+  app.route('/webhooks', webhookRoutes(deps));
 
   return app;
 }

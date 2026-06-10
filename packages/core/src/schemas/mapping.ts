@@ -12,12 +12,26 @@ export const mappingFieldSchema = z.object({
   sensitive: z.boolean().default(false),
 });
 
-export const mappingRuleSchema = z.object({
-  field: z.string().min(1),
-  op: z.enum(['gt', 'gte', 'lt', 'lte', 'eq', 'neq']),
+export const mappingRuleConditionSchema = z.object({
   column: z.string().min(1),
+  op: z.enum(['gt', 'gte', 'lt', 'lte', 'eq', 'neq']),
   value: z.union([z.string(), z.number(), z.boolean()]),
 });
+
+export const mappingRuleSchema = z
+  .object({
+    field: z.string().min(1),
+    op: z.enum(['gt', 'gte', 'lt', 'lte', 'eq', 'neq']).optional(),
+    column: z.string().min(1).optional(),
+    value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    conditions: z.array(mappingRuleConditionSchema).min(1).optional(),
+  })
+  .refine(
+    (rule) =>
+      (rule.conditions?.length ?? 0) > 0 ||
+      (rule.op !== undefined && rule.column !== undefined && rule.value !== undefined),
+    { message: 'Rule must define either conditions or op/column/value' },
+  );
 
 export const mappingDefaultFilterSchema = z.object({
   field: z.string().min(1),

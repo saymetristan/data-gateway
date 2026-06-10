@@ -32,9 +32,20 @@ export function validateMappingAgainstProfile(
     }
 
     for (const rule of entity.rules) {
-      if (!columns.has(rule.column)) {
+      if (rule.conditions?.length) {
+        for (const condition of rule.conditions) {
+          if (!columns.has(condition.column)) {
+            throw GatewayError.unprocessable(
+              `Rule for "${rule.field}" references unknown column "${condition.column}"`,
+            );
+          }
+        }
+        continue;
+      }
+
+      if (!rule.column || !columns.has(rule.column)) {
         throw GatewayError.unprocessable(
-          `Rule for "${rule.field}" references unknown column "${rule.column}"`,
+          `Rule for "${rule.field}" references unknown column "${rule.column ?? ''}"`,
         );
       }
     }

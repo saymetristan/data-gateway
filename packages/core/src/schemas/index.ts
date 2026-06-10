@@ -27,9 +27,16 @@ const csvSourceConfigSchema = z.object({
   fileName: z.string().optional(),
 });
 
+const shopifySyncStateSchema = z.object({
+  lastSyncedAt: z.string().optional(),
+});
+
 const shopifySourceConfigSchema = z.object({
-  shopDomain: z.string(),
-  accessToken: z.string(),
+  shopDomain: z.string().min(1),
+  accessToken: z.string().min(1),
+  webhookSecret: z.string().min(1).optional(),
+  apiVersion: z.string().min(1).optional(),
+  syncState: shopifySyncStateSchema.optional(),
 });
 
 export const createSourceSchema = z.discriminatedUnion('type', [

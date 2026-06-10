@@ -1,0 +1,31 @@
+{
+  "entities": [
+    {
+      "entity": "variant",
+      "sourceTable": "variants",
+      "fields": [
+        { "name": "sku", "sourceColumn": "sku", "type": "string", "searchable": true, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "title", "sourceColumn": "title", "type": "string", "searchable": true, "filterable": false, "visible": true, "sensitive": false },
+        { "name": "productTitle", "sourceColumn": "productTitle", "type": "string", "searchable": true, "filterable": false, "visible": true, "sensitive": false },
+        { "name": "price", "sourceColumn": "price", "type": "number", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "inventoryQuantity", "sourceColumn": "inventoryQuantity", "type": "number", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "size", "sourceColumn": "size", "type": "string", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "color", "sourceColumn": "color", "type": "string", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "collections", "sourceColumn": "collections", "type": "string", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "status", "sourceColumn": "status", "type": "string", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "cost", "sourceColumn": "unitCost", "type": "number", "searchable": false, "filterable": false, "visible": true, "sensitive": true }
+      ],
+      "rules": [
+        {
+          "field": "available",
+          "conditions": [
+            { "column": "status", "op": "eq", "value": "active" },
+            { "column": "inventoryQuantity", "op": "gt", "value": 0 }
+          ]
+        }
+      ],
+      "defaultFilters": [{ "field": "available", "op": "eq", "value": true }],
+      "embeddingTextTemplate": "{{productTitle}} {{title}} {{sku}} {{color}} {{size}} {{collections}}"
+    }
+  ]
+}

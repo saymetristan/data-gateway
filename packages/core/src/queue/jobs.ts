@@ -3,6 +3,8 @@ export const SOURCE_PROFILE_JOB = 'source.profile';
 export const SOURCE_INDEX_JOB = 'source.index';
 export const EMBEDDINGS_GENERATE_JOB = 'embeddings.generate';
 export const EVALS_RUN_JOB = 'evals.run';
+export const SHOPIFY_WEBHOOK_JOB = 'shopify.webhook';
+export const SHOPIFY_SYNC_SCHEDULED_JOB = 'shopify.sync.scheduled';
 
 export type SourceSyncJobData = {
   sourceId: string;
@@ -18,6 +20,14 @@ export type SourceProfileJobData = {
 export type SourceIndexJobData = {
   sourceId: string;
   workspaceId: string;
+  invalidateMaturity?: boolean;
+};
+
+export type ShopifyWebhookJobData = {
+  sourceId: string;
+  workspaceId: string;
+  topic: string;
+  payload: Record<string, unknown>;
 };
 
 export type EmbeddingsGenerateJobData = {

@@ -20,9 +20,15 @@ export function applyRules(
 ): Record<string, unknown> {
   const result = { ...data };
   for (const rule of rules) {
-    const left = payload[rule.column];
-    const right = rule.value;
-    result[rule.field] = evaluateRule(left, rule.op, right);
+    if (rule.conditions?.length) {
+      result[rule.field] = rule.conditions.every((condition) =>
+        evaluateRule(payload[condition.column], condition.op, condition.value),
+      );
+      continue;
+    }
+
+    if (!rule.op || !rule.column || rule.value === undefined) continue;
+    result[rule.field] = evaluateRule(payload[rule.column], rule.op, rule.value);
   }
   return result;
 }
