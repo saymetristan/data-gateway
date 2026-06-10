@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from '../db/client.js';
 import {
@@ -43,7 +43,11 @@ export async function indexSource(
   options: IndexSourceOptions = {},
 ): Promise<{ indexed: number; embeddingJobs: number }> {
   const invalidateMaturity = options.invalidateMaturity ?? true;
-  const [source] = await db.select().from(sources).where(eq(sources.id, sourceId)).limit(1);
+  const [source] = await db
+    .select()
+    .from(sources)
+    .where(and(eq(sources.id, sourceId), eq(sources.workspaceId, workspaceId)))
+    .limit(1);
   if (!source) {
     throw GatewayError.notFound('Source not found');
   }
@@ -98,6 +102,13 @@ export async function indexSource(
         )
         .limit(1);
 
+      const unchanged =
+        existing !== undefined &&
+        existing.mappingVersion === mapping.version &&
+        existing.searchSource === searchSource &&
+        existing.sourceRecordHash === dataHash;
+      if (unchanged) continue;
+
       const [upserted] = await db
         .insert(records)
         .values({
@@ -124,16 +135,8 @@ export async function indexSource(
 
       if (!upserted) continue;
 
-      const shouldEmbed =
-        !existing ||
-        existing.mappingVersion !== mapping.version ||
-        existing.searchSource !== searchSource ||
-        existing.sourceRecordHash !== dataHash;
-
-      if (shouldEmbed) {
-        recordIdsForEmbedding.push(upserted.id);
-        indexed += 1;
-      }
+      recordIdsForEmbedding.push(upserted.id);
+      indexed += 1;
     }
 
     if (rawRows.length < RAW_BATCH_SIZE) break;
@@ -161,10 +164,39 @@ export async function indexSource(
     await maybeTransitionSourceMaturity(db, sourceId, 'indexed', 'source_indexed', ['mapped']);
   }
 
+  await purgeOldEmbeddingsForSource(db, sourceId, mapping.version);
+
   return {
     indexed,
     embeddingJobs: Math.ceil(recordIdsForEmbedding.length / EMBEDDING_BATCH_SIZE),
   };
+}
+
+async function purgeOldEmbeddingsForSource(
+  db: Database,
+  sourceId: string,
+  activeMappingVersion: number,
+): Promise<void> {
+  // Only purge an old-version embedding once its record already has an
+  // active-version embedding, so search never has an empty window.
+  const rows = await db
+    .select({ embeddingId: recordEmbeddings.id })
+    .from(recordEmbeddings)
+    .innerJoin(records, eq(records.id, recordEmbeddings.recordId))
+    .where(
+      and(
+        eq(records.sourceId, sourceId),
+        sql`${recordEmbeddings.mappingVersion} <> ${activeMappingVersion}`,
+        sql`EXISTS (
+          SELECT 1 FROM record_embeddings AS active_emb
+          WHERE active_emb.record_id = ${recordEmbeddings.recordId}
+            AND active_emb.mapping_version = ${activeMappingVersion}
+        )`,
+      ),
+    );
+
+  if (rows.length === 0) return;
+  await db.delete(recordEmbeddings).where(inArray(recordEmbeddings.id, rows.map((row) => row.embeddingId)));
 }
 
 export async function generateEmbeddingsForRecords(

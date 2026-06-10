@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import {
+  enforceDistributedWebhookRateLimit,
   enqueueJob,
   GatewayError,
-  isDuplicateWebhook,
   resolveShopifyWebhookSource,
   SHOPIFY_WEBHOOK_JOB,
   verifyShopifyHmac,
@@ -24,30 +24,40 @@ export function webhookRoutes(deps: AppBindings) {
     }
 
     const db = deps.db;
+    await enforceDistributedWebhookRateLimit(db, `shopify:${shopDomain}`);
+
     const resolved = await resolveShopifyWebhookSource(
       db,
       shopDomain,
       deps.env.CREDENTIALS_ENCRYPTION_KEY,
     );
     if (!resolved) {
-      throw GatewayError.notFound('Shopify source not found for shop domain');
+      throw GatewayError.unauthorized('Invalid Shopify webhook signature');
     }
 
     if (!verifyShopifyHmac(rawBody, providedHmac, resolved.webhookSecret)) {
       throw GatewayError.unauthorized('Invalid Shopify webhook signature');
     }
 
-    if (webhookId && isDuplicateWebhook(webhookId)) {
-      return c.json({ status: 'duplicate' });
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(rawBody) as Record<string, unknown>;
+    } catch {
+      throw GatewayError.validation('Invalid Shopify webhook JSON payload');
     }
 
-    const payload = JSON.parse(rawBody) as Record<string, unknown>;
-    const jobId = await enqueueJob(deps.env.DATABASE_URL, SHOPIFY_WEBHOOK_JOB, {
-      sourceId: resolved.sourceId,
-      workspaceId: resolved.workspaceId,
-      topic,
-      payload,
-    });
+    const jobId = await enqueueJob(
+      deps.env.DATABASE_URL,
+      SHOPIFY_WEBHOOK_JOB,
+      {
+        sourceId: resolved.sourceId,
+        workspaceId: resolved.workspaceId,
+        topic,
+        payload,
+        webhookId,
+      },
+      webhookId ? { singletonKey: `shopify-webhook:${webhookId}` } : {},
+    );
 
     return c.json({ status: 'queued', jobId });
   });

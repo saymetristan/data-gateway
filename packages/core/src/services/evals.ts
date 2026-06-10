@@ -4,7 +4,9 @@ import {
   evalCases,
   evalRuns,
   evalSets,
+  mappings,
   records,
+  sourceTransitions,
   sources,
   workspaces,
 } from '../db/schema/index.js';
@@ -223,6 +225,7 @@ export async function runEvalSet(
     const executions = [];
     const evaluations = [];
     const forbiddenFieldsPerCase: string[][] = [];
+    const evaluatedSourceIds = new Set<string>();
 
     for (const evalCase of cases) {
       const started = Date.now();
@@ -241,6 +244,10 @@ export async function runEvalSet(
       const latencyMs = Date.now() - started;
 
       const recordIds = response.results.map((result) => result.id);
+      const sourceIds = await resolveSourceIds(db, recordIds);
+      for (const sourceId of sourceIds) {
+        evaluatedSourceIds.add(sourceId);
+      }
       const externalIds = await resolveExternalIds(db, recordIds);
       const assertions: EvalCaseAssertions = {};
       if (evalCase.expectedResultIds) {
@@ -292,7 +299,10 @@ export async function runEvalSet(
     }));
 
     const sensitiveLeaks = countSensitiveLeaks(executions, forbiddenFieldsPerCase);
-    const metrics = aggregateEvalMetrics({ caseResults, sensitiveLeaks });
+    const metrics = {
+      ...aggregateEvalMetrics({ caseResults, sensitiveLeaks }),
+      sourceIds: [...evaluatedSourceIds],
+    };
     const { passed, failed } = toCaseResults(
       executions,
       evaluations.map((item) => ({ passed: item.passed, reasons: item.reasons })),
@@ -387,6 +397,12 @@ export async function activateSource(
       `No completed eval run found for eval set ${evalSet.id} (threshold ${String(evalSet.threshold)})`,
     );
   }
+  const latestRelevantChange = await getLatestEvalRelevantChange(db, sourceId);
+  if (latestRun.finishedAt && latestRelevantChange && latestRun.finishedAt < latestRelevantChange) {
+    throw GatewayError.conflict(
+      `Latest eval run ${latestRun.id} is older than the latest source change`,
+    );
+  }
 
   const metrics = latestRun.metrics as { score?: number; sensitiveLeaks?: number };
   const score = metrics.score ?? 0;
@@ -407,6 +423,36 @@ export async function activateSource(
     'agent_ready',
     `activate_after_eval_run:${latestRun.id}`,
   );
+}
+
+async function getLatestEvalRelevantChange(
+  db: Database,
+  sourceId: string,
+): Promise<Date | null> {
+  const [mapping] = await db
+    .select({ updatedAt: mappings.updatedAt })
+    .from(mappings)
+    .where(and(eq(mappings.sourceId, sourceId), eq(mappings.status, 'active')))
+    .orderBy(desc(mappings.version))
+    .limit(1);
+  const [indexedTransition] = await db
+    .select({ createdAt: sourceTransitions.createdAt })
+    .from(sourceTransitions)
+    .where(and(eq(sourceTransitions.sourceId, sourceId), eq(sourceTransitions.reason, 'source_reindexed')))
+    .orderBy(desc(sourceTransitions.createdAt))
+    .limit(1);
+  const [latestRecord] = await db
+    .select({ updatedAt: records.updatedAt })
+    .from(records)
+    .where(eq(records.sourceId, sourceId))
+    .orderBy(desc(records.updatedAt))
+    .limit(1);
+
+  const dates = [mapping?.updatedAt, indexedTransition?.createdAt, latestRecord?.updatedAt].filter(
+    (value): value is Date => value instanceof Date,
+  );
+  if (dates.length === 0) return null;
+  return new Date(Math.max(...dates.map((date) => date.getTime())));
 }
 
 async function getEvalSetForWorkspace(
@@ -470,7 +516,7 @@ async function promoteSourcesAfterEvalPass(
 ) {
   const targetSources = evalSet.sourceId
     ? [evalSet.sourceId]
-    : (await listQueryableSources(db, workspaceId)).map((source) => source.id);
+    : await resolvePromotableSourcesFromRun(db, evalRunId);
 
   for (const sourceId of targetSources) {
     await maybeTransitionSourceMaturity(
@@ -483,6 +529,14 @@ async function promoteSourcesAfterEvalPass(
   }
 }
 
+async function resolvePromotableSourcesFromRun(db: Database, evalRunId: string): Promise<string[]> {
+  const [run] = await db.select().from(evalRuns).where(eq(evalRuns.id, evalRunId)).limit(1);
+  const metrics = (run?.metrics ?? {}) as { sourceIds?: unknown };
+  return Array.isArray(metrics.sourceIds)
+    ? metrics.sourceIds.filter((id): id is string => typeof id === 'string')
+    : [];
+}
+
 async function resolveExternalIds(db: Database, recordIds: string[]): Promise<string[]> {
   if (recordIds.length === 0) return [];
 
@@ -493,6 +547,16 @@ async function resolveExternalIds(db: Database, recordIds: string[]): Promise<st
 
   const byId = new Map(rows.map((row) => [row.id, row.externalId]));
   return recordIds.map((id) => byId.get(id)).filter((id): id is string => Boolean(id));
+}
+
+async function resolveSourceIds(db: Database, recordIds: string[]): Promise<string[]> {
+  if (recordIds.length === 0) return [];
+
+  const rows = await db
+    .select({ sourceId: records.sourceId })
+    .from(records)
+    .where(inArray(records.id, recordIds));
+  return [...new Set(rows.map((row) => row.sourceId))];
 }
 
 export async function seedEvalCasesFromFixture(

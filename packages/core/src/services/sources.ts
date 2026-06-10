@@ -4,6 +4,7 @@ import { sourceRecordsRaw, sources } from '../db/schema/index.js';
 import { decryptSourceConfig, encryptSourceConfig } from '../crypto/credentials.js';
 import { createDatabaseConnector } from '../connectors/factory.js';
 import { createShopifyClient } from '../connectors/shopify/client.js';
+import { normalizeShopifyDomain } from '../connectors/shopify/domain.js';
 import { createMockShopifyClient } from '../connectors/shopify/mock.js';
 import { registerShopifyWebhooks } from './shopify-sync.js';
 import { GatewayError } from '../errors/gateway-error.js';
@@ -26,7 +27,7 @@ export async function createSourceWithValidation(
       if (!validation.ok) {
         throw GatewayError.unprocessable(
           'Database connection failed',
-          validation.message,
+          'Unable to validate database connection',
         );
       }
       if (!validation.readOnly) {
@@ -40,6 +41,8 @@ export async function createSourceWithValidation(
   }
 
   if (input.type === 'shopify') {
+    input.config.shopDomain = normalizeShopifyDomain(input.config.shopDomain);
+    await assertUniqueShopifyDomain(db, input.config.shopDomain);
     const client = options.useMockProviders
       ? createMockShopifyClient()
       : createShopifyClient({
@@ -52,7 +55,7 @@ export async function createSourceWithValidation(
       if (!validation.ok) {
         throw GatewayError.unprocessable(
           'Shopify connection failed',
-          validation.message,
+          'Unable to validate Shopify credentials',
         );
       }
     } finally {
@@ -83,11 +86,16 @@ export async function createSourceWithValidation(
 
   if (input.type === 'database_url' || input.type === 'shopify') {
     try {
-      await enqueueJob(connectionString, SOURCE_SYNC_JOB, {
-        sourceId: source.id,
-        workspaceId,
-        fullSync: true,
-      });
+      await enqueueJob(
+        connectionString,
+        SOURCE_SYNC_JOB,
+        {
+          sourceId: source.id,
+          workspaceId,
+          fullSync: true,
+        },
+        { singletonKey: `source-sync:${source.id}` },
+      );
 
       if (
         input.type === 'shopify' &&
@@ -113,6 +121,23 @@ export async function createSourceWithValidation(
   }
 
   return source;
+}
+
+async function assertUniqueShopifyDomain(db: Database, shopDomain: string): Promise<void> {
+  const rows = await db
+    .select({ id: sources.id, config: sources.config })
+    .from(sources)
+    .where(eq(sources.type, 'shopify'));
+
+  for (const row of rows) {
+    const config = row.config as Record<string, unknown>;
+    const existingDomain = typeof config.shopDomain === 'string'
+      ? normalizeShopifyDomain(config.shopDomain)
+      : '';
+    if (existingDomain === shopDomain) {
+      throw GatewayError.conflict('Shopify shop domain is already connected');
+    }
+  }
 }
 
 export function getDecryptedSourceConfig(

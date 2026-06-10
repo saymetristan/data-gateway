@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, like, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { records, sourceRecordsRaw } from '../db/schema/index.js';
 import { payloadHash } from '../utils/hash.js';
@@ -105,6 +105,47 @@ export async function removeStaleRawRecords(
       await db.delete(records).where(eq(records.id, record.id));
     }
   }
+}
+
+export async function removeStaleRawRecordsByPrefix(
+  db: Database,
+  sourceId: string,
+  prefix: string,
+  seenRecordIds: Set<string>,
+): Promise<void> {
+  const rawRows = await db
+    .select({ sourceRecordId: sourceRecordsRaw.sourceRecordId })
+    .from(sourceRecordsRaw)
+    .where(and(eq(sourceRecordsRaw.sourceId, sourceId), like(sourceRecordsRaw.sourceRecordId, `${prefix}%`)));
+
+  const staleIds = rawRows
+    .map((row) => row.sourceRecordId)
+    .filter((sourceRecordId) => !seenRecordIds.has(sourceRecordId));
+  await deleteRawRecords(db, sourceId, staleIds);
+}
+
+export async function removeStaleVariantRecordsForProduct(
+  db: Database,
+  sourceId: string,
+  productId: string,
+  liveVariantRecordIds: Set<string>,
+): Promise<void> {
+  const rows = await db
+    .select({ sourceRecordId: sourceRecordsRaw.sourceRecordId })
+    .from(sourceRecordsRaw)
+    .where(
+      and(
+        eq(sourceRecordsRaw.sourceId, sourceId),
+        like(sourceRecordsRaw.sourceRecordId, 'variants:%'),
+        sql`${sourceRecordsRaw.payload}->>'productId' = ${productId}`,
+      ),
+    );
+
+  const staleIds = rows
+    .map((row) => row.sourceRecordId)
+    .filter((sourceRecordId) => !liveVariantRecordIds.has(sourceRecordId));
+
+  await deleteRawRecords(db, sourceId, staleIds);
 }
 
 function externalIdFromSourceRecordId(sourceRecordId: string): string {

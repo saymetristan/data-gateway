@@ -70,11 +70,7 @@ export async function syncDatabaseSource(
           : undefined;
       const persistedState =
         !options.fullSync && businessCursorColumn ? syncState[tableKey] : undefined;
-      const cursorState =
-        persistedState &&
-        (!cursorTieBreakerColumn || persistedState.cursorTieBreakerValue)
-          ? persistedState
-          : undefined;
+      const cursorState = persistedState?.cursorValue ? persistedState : undefined;
       const orderBy = [cursorColumn, ...(cursorTieBreakerColumn ? [cursorTieBreakerColumn] : [])];
       const streamOptions = {
         batchSize: 200,
@@ -82,7 +78,9 @@ export async function syncDatabaseSource(
         ...(cursorColumn
           ? {
               cursorColumn,
-              ...(cursorTieBreakerColumn ? { cursorTieBreakerColumn } : {}),
+              ...(cursorTieBreakerColumn && cursorState?.cursorTieBreakerValue
+                ? { cursorTieBreakerColumn }
+                : {}),
               ...(cursorState?.cursorValue ? { cursorValue: cursorState.cursorValue } : {}),
               ...(cursorState?.cursorTieBreakerValue
                 ? { cursorTieBreakerValue: cursorState.cursorTieBreakerValue }

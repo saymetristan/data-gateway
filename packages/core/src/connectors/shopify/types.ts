@@ -8,6 +8,7 @@ export type ShopifyCollection = {
 export type ShopifyVariant = {
   id: string;
   productId: string;
+  inventoryItemId: string | null;
   sku: string;
   title: string;
   price: number;
@@ -44,6 +45,7 @@ export interface ShopifyClient {
   }): Promise<PaginatedResult<ShopifyProduct>>;
   fetchCollections(options?: { cursor?: string }): Promise<PaginatedResult<ShopifyCollection>>;
   fetchProductById(productId: string): Promise<ShopifyProduct | null>;
+  fetchProductByInventoryItemId(inventoryItemId: string): Promise<ShopifyProduct | null>;
   registerWebhooks(callbackUrl: string, topics: string[]): Promise<void>;
   close(): Promise<void>;
 }

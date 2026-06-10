@@ -182,7 +182,10 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
 
     return response;
   } catch (error) {
-    errorMessage = error instanceof Error ? error.message : 'Unknown query error';
+    errorMessage =
+      error instanceof GatewayError
+        ? error.message
+        : 'Query execution failed';
     await writeQueryLog(input, {
       rawQuery: input.request.query,
       structuredQuery: { extracted: appliedFilters },

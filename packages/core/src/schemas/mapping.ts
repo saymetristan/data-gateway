@@ -2,15 +2,19 @@ import { z } from 'zod';
 
 export const mappingFieldTypeSchema = z.enum(['string', 'number', 'boolean', 'date']);
 
-export const mappingFieldSchema = z.object({
-  name: z.string().min(1),
-  sourceColumn: z.string().min(1),
-  type: mappingFieldTypeSchema,
-  searchable: z.boolean().default(false),
-  filterable: z.boolean().default(false),
-  visible: z.boolean().default(true),
-  sensitive: z.boolean().default(false),
-});
+export const mappingFieldSchema = z
+  .object({
+    name: z.string().min(1),
+    sourceColumn: z.string().min(1),
+    type: mappingFieldTypeSchema,
+    searchable: z.boolean().default(false),
+    filterable: z.boolean().default(false),
+    visible: z.boolean().default(true),
+    sensitive: z.boolean().default(false),
+  })
+  .refine((field) => !field.sensitive || (!field.searchable && !field.filterable), {
+    message: 'Sensitive fields cannot be searchable or filterable',
+  });
 
 export const mappingRuleConditionSchema = z.object({
   column: z.string().min(1),
@@ -31,6 +35,14 @@ export const mappingRuleSchema = z
       (rule.conditions?.length ?? 0) > 0 ||
       (rule.op !== undefined && rule.column !== undefined && rule.value !== undefined),
     { message: 'Rule must define either conditions or op/column/value' },
+  )
+  .refine(
+    (rule) =>
+      !(
+        (rule.conditions?.length ?? 0) > 0 &&
+        (rule.op !== undefined || rule.column !== undefined || rule.value !== undefined)
+      ),
+    { message: 'Rule cannot mix conditions with op/column/value' },
   );
 
 export const mappingDefaultFilterSchema = z.object({

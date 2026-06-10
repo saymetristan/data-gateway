@@ -10,6 +10,7 @@ import {
   workspaces,
   encryptSourceConfig,
   computeShopifyHmac,
+  generateApiKey,
   MockEmbeddingProvider,
   MockLlmProvider,
   type Database,
@@ -144,7 +145,7 @@ describe.runIf(hasDatabase)('API integration', () => {
         Authorization: `Bearer ${adminKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ scopes: [] }),
+      body: JSON.stringify({}),
     });
     expect(keyRes.status).toBe(201);
     const { key } = (await keyRes.json()) as { key: string };
@@ -172,6 +173,32 @@ describe.runIf(hasDatabase)('API integration', () => {
       body: JSON.stringify({ type: 'csv', name: 'X', config: {} }),
     });
     expect(wrongKeyRes.status).toBe(401);
+  });
+
+  it('rejects an API key with empty scopes', async () => {
+    const [workspace] = await db
+      .insert(workspaces)
+      .values({ name: 'Empty Scopes', slug: `empty-scopes-${Date.now()}`, settings: {} })
+      .returning();
+    if (!workspace) throw new Error('workspace missing');
+    const generated = generateApiKey();
+
+    await db.insert(apiKeys).values({
+      workspaceId: workspace.id,
+      keyHash: generated.hash,
+      prefix: generated.prefix,
+      scopes: [],
+    });
+
+    const res = await app.request('/sources', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${generated.key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ type: 'csv', name: 'Blocked', config: {} }),
+    });
+    expect(res.status).toBe(401);
   });
 
   it('returns 401 with a revoked API key', async () => {

@@ -15,7 +15,6 @@ import {
   processShopifyWebhook,
   profileSource,
   records,
-  resetWebhookDedupeForTests,
   runEvalSet,
   sourceRecordsRaw,
   sources,
@@ -154,7 +153,6 @@ describe.runIf(hasDatabase)('shopify integration', () => {
 
   it('webhook update re-index no demota agent_ready', async () => {
     await withTestDatabase(async (db, testUrl) => {
-      resetWebhookDedupeForTests();
       const [workspace] = await db
         .insert(workspaces)
         .values({ name: 'Webhook', slug: `wh-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
@@ -192,9 +190,70 @@ describe.runIf(hasDatabase)('shopify integration', () => {
     });
   });
 
+  it('webhook de inventory_levels/update refetchea por inventory_item_id', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Inventory', slug: `inv-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      const { source, client } = await bootstrapShopifySource(db, testUrl, workspace.id);
+      const product = client.getProduct('1');
+      const variant = product?.variants[0];
+      if (!product || !variant?.inventoryItemId) throw new Error('variant missing');
+      variant.inventoryQuantity += 7;
+      client.updateProduct(product);
+
+      await processShopifyWebhook(db, testUrl, client, {
+        sourceId: source.id,
+        workspaceId: workspace.id,
+        topic: 'inventory_levels/update',
+        payload: { inventory_item_id: variant.inventoryItemId },
+      });
+
+      const [updated] = await db
+        .select()
+        .from(sourceRecordsRaw)
+        .where(eq(sourceRecordsRaw.sourceRecordId, `variants:${variant.id}`))
+        .limit(1);
+      const payload = updated?.payload as Record<string, unknown> | undefined;
+      expect(payload?.inventoryQuantity).toBe(variant.inventoryQuantity);
+    });
+  });
+
+  it('webhook update elimina variantes que ya no existen en el producto', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Variant Delete', slug: `var-del-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      const { source, client } = await bootstrapShopifySource(db, testUrl, workspace.id);
+      const product = client.getProduct('3');
+      const removed = product?.variants[0];
+      if (!product || !removed) throw new Error('variant missing');
+      product.variants = product.variants.slice(1);
+      client.updateProduct(product);
+
+      await processShopifyWebhook(db, testUrl, client, {
+        sourceId: source.id,
+        workspaceId: workspace.id,
+        topic: 'products/update',
+        payload: { id: product.id },
+      });
+
+      const rows = await db
+        .select()
+        .from(sourceRecordsRaw)
+        .where(eq(sourceRecordsRaw.sourceId, source.id));
+      expect(rows.some((row) => row.sourceRecordId === `variants:${removed.id}`)).toBe(false);
+    });
+  });
+
   it('cross-workspace: webhook solo toca la fuente del shop', async () => {
     await withTestDatabase(async (db, testUrl) => {
-      resetWebhookDedupeForTests();
       const [wsA] = await db
         .insert(workspaces)
         .values({ name: 'Shop A', slug: `wsa-${crypto.randomUUID().slice(0, 8)}`, settings: {} })

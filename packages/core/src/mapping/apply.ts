@@ -42,13 +42,13 @@ function evaluateRule(
 
   switch (op) {
     case 'gt':
-      return Number(toScalarString(left)) > Number(right);
+      return compareNumbers(left, right, (a, b) => a > b);
     case 'gte':
-      return Number(toScalarString(left)) >= Number(right);
+      return compareNumbers(left, right, (a, b) => a >= b);
     case 'lt':
-      return Number(toScalarString(left)) < Number(right);
+      return compareNumbers(left, right, (a, b) => a < b);
     case 'lte':
-      return Number(toScalarString(left)) <= Number(right);
+      return compareNumbers(left, right, (a, b) => a <= b);
     case 'eq':
       return left === right || toScalarString(left) === toScalarString(right);
     case 'neq':
@@ -58,13 +58,24 @@ function evaluateRule(
   }
 }
 
+function compareNumbers(
+  left: unknown,
+  right: string | number | boolean,
+  predicate: (left: number, right: number) => boolean,
+): boolean {
+  const leftNumber = Number(toScalarString(left));
+  const rightNumber = Number(right);
+  if (Number.isNaN(leftNumber) || Number.isNaN(rightNumber)) return false;
+  return predicate(leftNumber, rightNumber);
+}
+
 export function buildSearchSource(
   data: Record<string, unknown>,
   fields: MappingField[],
 ): string {
   const parts: string[] = [];
   for (const field of fields) {
-    if (!field.searchable) continue;
+    if (!field.searchable || field.sensitive) continue;
     const value = data[field.name];
     if (value === null || value === undefined) continue;
     parts.push(toScalarString(value));

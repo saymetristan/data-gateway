@@ -10,9 +10,11 @@ export function verifyShopifyHmac(
   secret: string,
 ): boolean {
   if (!providedHmac) return false;
-  const expected = computeShopifyHmac(rawBody, secret);
-  const expectedBuffer = Buffer.from(expected, 'utf8');
-  const providedBuffer = Buffer.from(providedHmac, 'utf8');
-  if (expectedBuffer.length !== providedBuffer.length) return false;
-  return timingSafeEqual(expectedBuffer, providedBuffer);
+  const expectedBuffer = createHmac('sha256', secret).update(rawBody, 'utf8').digest();
+  const providedBuffer = Buffer.from(providedHmac, 'base64');
+  const comparable =
+    providedBuffer.length === expectedBuffer.length
+      ? providedBuffer
+      : Buffer.alloc(expectedBuffer.length);
+  return timingSafeEqual(expectedBuffer, comparable) && providedBuffer.length === expectedBuffer.length;
 }

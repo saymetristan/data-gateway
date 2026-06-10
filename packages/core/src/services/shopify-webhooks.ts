@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, like, or, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import type { ShopifyClient } from '../connectors/shopify/types.js';
 import { parseShopifyGid } from '../connectors/shopify/gid.js';
@@ -9,6 +9,7 @@ import { sourceRecordsRaw, sources } from '../db/schema/index.js';
 import { getDecryptedSourceConfig } from './sources.js';
 import { findShopifySourceByDomain, upsertShopifyProduct } from './shopify-sync.js';
 import { deleteRawRecords } from './raw-records.js';
+import { completeWebhookEvent, failWebhookEvent, startWebhookEventProcessing } from './webhooks.js';
 
 export async function processShopifyWebhook(
   db: Database,
@@ -26,27 +27,45 @@ export async function processShopifyWebhook(
     throw GatewayError.notFound('Shopify source not found');
   }
 
+  const shouldProcess = await startWebhookEventProcessing(db, {
+    sourceId: data.sourceId,
+    provider: 'shopify',
+    webhookId: data.webhookId ?? null,
+    topic: data.topic,
+  });
+  if (!shouldProcess) {
+    await client.close();
+    return;
+  }
+
   try {
+    let changed = false;
     switch (data.topic) {
       case 'products/create':
       case 'products/update':
-        await handleProductUpsert(db, data.sourceId, data.payload, client);
+        changed = await handleProductUpsert(db, data.sourceId, data.payload, client);
         break;
       case 'products/delete':
-        await handleProductDelete(db, data.sourceId, data.payload);
+        changed = await handleProductDelete(db, data.sourceId, data.payload);
         break;
       case 'inventory_levels/update':
-        await handleInventoryUpdate(db, data.sourceId, data.payload, client);
+        changed = await handleInventoryUpdate(db, data.sourceId, data.payload, client);
         break;
       default:
-        return;
+        break;
     }
 
-    await enqueueJob(connectionString, SOURCE_INDEX_JOB, {
-      sourceId: data.sourceId,
-      workspaceId: data.workspaceId,
-      invalidateMaturity: false,
-    });
+    if (changed) {
+      await enqueueJob(connectionString, SOURCE_INDEX_JOB, {
+        sourceId: data.sourceId,
+        workspaceId: data.workspaceId,
+        invalidateMaturity: false,
+      });
+    }
+    await completeWebhookEvent(db, 'shopify', data.webhookId);
+  } catch (error) {
+    await failWebhookEvent(db, 'shopify', data.webhookId);
+    throw error;
   } finally {
     await client.close();
   }
@@ -79,23 +98,25 @@ async function handleProductUpsert(
   sourceId: string,
   payload: Record<string, unknown>,
   client: ShopifyClient,
-): Promise<void> {
+): Promise<boolean> {
   const productId = extractProductId(payload);
-  if (!productId) return;
+  if (!productId) return false;
 
   const product = await client.fetchProductById(productId);
-  if (!product) return;
+  if (!product) return false;
   await upsertShopifyProduct(db, sourceId, product);
+  return true;
 }
 
 async function handleProductDelete(
   db: Database,
   sourceId: string,
   payload: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   const productId = extractProductId(payload);
-  if (!productId) return;
+  if (!productId) return false;
   await deleteShopifyProductRecords(db, sourceId, productId);
+  return true;
 }
 
 async function handleInventoryUpdate(
@@ -103,15 +124,19 @@ async function handleInventoryUpdate(
   sourceId: string,
   payload: Record<string, unknown>,
   client: ShopifyClient,
-): Promise<void> {
-  const productId = typeof payload.product_id === 'number' || typeof payload.product_id === 'string'
-    ? String(payload.product_id)
-    : null;
-  if (!productId) return;
+): Promise<boolean> {
+  const inventoryItemId =
+    typeof payload.inventory_item_id === 'number' || typeof payload.inventory_item_id === 'string'
+      ? String(payload.inventory_item_id)
+      : typeof payload.admin_graphql_api_id === 'string'
+        ? parseShopifyGid(payload.admin_graphql_api_id)
+        : null;
+  if (!inventoryItemId) return false;
 
-  const product = await client.fetchProductById(productId);
-  if (!product) return;
+  const product = await client.fetchProductByInventoryItemId(inventoryItemId);
+  if (!product) return false;
   await upsertShopifyProduct(db, sourceId, product);
+  return true;
 }
 
 function extractProductId(payload: Record<string, unknown>): string | null {
@@ -135,7 +160,18 @@ export async function deleteShopifyProductRecords(
       payload: sourceRecordsRaw.payload,
     })
     .from(sourceRecordsRaw)
-    .where(eq(sourceRecordsRaw.sourceId, sourceId));
+    .where(
+      and(
+        eq(sourceRecordsRaw.sourceId, sourceId),
+        or(
+          eq(sourceRecordsRaw.sourceRecordId, `products:${productId}`),
+          and(
+            like(sourceRecordsRaw.sourceRecordId, 'variants:%'),
+            sql`${sourceRecordsRaw.payload}->>'productId' = ${productId}`,
+          ),
+        ),
+      ),
+    );
 
   const recordIds = rows
     .filter((row) => {

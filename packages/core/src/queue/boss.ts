@@ -17,9 +17,10 @@ export async function enqueueJob(
   connectionString: string,
   jobName: string,
   data: Record<string, unknown>,
+  options: PgBoss.SendOptions = {},
 ): Promise<string | null> {
   const boss = await getQueue(connectionString);
-  return boss.send(jobName, data);
+  return boss.send(jobName, data, options);
 }
 
 export async function closeQueue(): Promise<void> {

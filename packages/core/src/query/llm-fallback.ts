@@ -21,7 +21,7 @@ export async function extractFiltersWithLlm(
   input: LlmFallbackInput,
 ): Promise<LlmFallbackResult> {
   const warnings: string[] = [];
-  const filterableFields = input.entity.fields.filter((field) => field.filterable);
+  const filterableFields = input.entity.fields.filter((field) => field.filterable && !field.sensitive);
   if (filterableFields.length === 0 || !input.unresolvedText.trim()) {
     return { filters: [], warnings };
   }

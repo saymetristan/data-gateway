@@ -10,7 +10,7 @@ export const apiKeys = pgTable(
       .references(() => workspaces.id, { onDelete: 'cascade' }),
     keyHash: text('key_hash').notNull(),
     prefix: text('prefix').notNull(),
-    scopes: text('scopes').array().notNull().default([]),
+    scopes: text('scopes').array().notNull().default(['*']),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -51,11 +51,27 @@ export function validateMappingAgainstProfile(
     }
 
     const fieldNames = new Set(entity.fields.map((field) => field.name));
+    const ruleFieldNames = new Set(entity.rules.map((rule) => rule.field));
+    for (const filter of entity.defaultFilters) {
+      if (!fieldNames.has(filter.field) && !ruleFieldNames.has(filter.field)) {
+        throw GatewayError.unprocessable(
+          `Default filter references unknown field "${filter.field}" in entity "${entity.entity}"`,
+        );
+      }
+    }
+    const sensitiveFieldNames = new Set(
+      entity.fields.filter((field) => field.sensitive).map((field) => field.name),
+    );
     for (const match of entity.embeddingTextTemplate.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)) {
       const fieldName = match[1];
       if (fieldName && !fieldNames.has(fieldName)) {
         throw GatewayError.unprocessable(
           `Embedding template references unknown field "${fieldName}" in entity "${entity.entity}"`,
+        );
+      }
+      if (fieldName && sensitiveFieldNames.has(fieldName)) {
+        throw GatewayError.unprocessable(
+          `Embedding template references sensitive field "${fieldName}" in entity "${entity.entity}"`,
         );
       }
     }

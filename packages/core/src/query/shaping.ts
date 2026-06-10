@@ -24,5 +24,9 @@ export function shapeAppliedFilters(
 }
 
 export function filterableFieldNames(fields: MappingField[]): Set<string> {
-  return new Set(fields.filter((field) => field.filterable).map((field) => field.name));
+  return new Set(
+    fields
+      .filter((field) => field.filterable && !field.sensitive)
+      .map((field) => field.name),
+  );
 }

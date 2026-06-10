@@ -22,6 +22,7 @@ export function variantToRawPayload(
     __table: 'variants',
     id: variant.id,
     productId: product.id,
+    inventoryItemId: variant.inventoryItemId,
     sku: variant.sku,
     title: variant.title,
     price: variant.price,

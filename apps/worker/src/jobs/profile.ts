@@ -17,7 +17,7 @@ export function registerProfileJobs(boss: PgBoss, env: WorkerEnv): void {
     const pool = createPool(env.DATABASE_URL);
     const db = createDbFromPool(pool);
     try {
-      await profileSource(db, data.sourceId);
+      await profileSource(db, data.sourceId, data.workspaceId);
     } finally {
       await pool.end();
     }

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { normalizeShopifyDomain } from './domain.js';
 import { createMockShopifyClient } from './mock.js';
 import { productToRawPayload, variantToRawPayload } from './transform.js';
 
@@ -18,6 +19,17 @@ describe('shopify transform', () => {
     const variantPayload = variantToRawPayload(product, variant);
     expect(variantPayload.__table).toBe('variants');
     expect(variantPayload.productId).toBe(product.id);
+    expect(variantPayload.inventoryItemId).toBe(variant.inventoryItemId);
     expect(variantPayload.status).toBe(product.status);
+  });
+
+  it('canoniza dominios Shopify a myshopify.com exacto', () => {
+    expect(normalizeShopifyDomain('https://Demo-Shop.myshopify.com/admin')).toBe(
+      'demo-shop.myshopify.com',
+    );
+    expect(normalizeShopifyDomain('demo-shop')).toBe('demo-shop.myshopify.com');
+    expect(normalizeShopifyDomain('demo-shop.myshopify.com:8080')).toBe(
+      'demo-shop.myshopify.com',
+    );
   });
 });

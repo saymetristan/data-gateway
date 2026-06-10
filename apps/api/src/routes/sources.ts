@@ -70,11 +70,16 @@ export function sourceRoutes(deps: AppBindings) {
       throw GatewayError.validation('Sync is only supported for database_url and shopify sources');
     }
 
-    const jobId = await enqueueJob(deps.env.DATABASE_URL, SOURCE_SYNC_JOB, {
-      sourceId: source.id,
-      workspaceId,
-      fullSync: source.type === 'shopify' ? false : true,
-    });
+    const jobId = await enqueueJob(
+      deps.env.DATABASE_URL,
+      SOURCE_SYNC_JOB,
+      {
+        sourceId: source.id,
+        workspaceId,
+        fullSync: source.type === 'shopify' ? false : true,
+      },
+      { singletonKey: `source-sync:${source.id}` },
+    );
 
     return c.json({ jobId, status: 'queued' }, 202);
   });
@@ -127,7 +132,29 @@ export function sourceRoutes(deps: AppBindings) {
     const sourceId = sourceIdParam(c.req.param('id'));
     await getSourceForWorkspace(db, workspaceId, sourceId);
     const profile = await getSourceProfile(db, sourceId);
-    return c.json(profile);
+    const mapping = await getActiveMapping(db, sourceId).catch((error: unknown) => {
+      if (error instanceof GatewayError && error.code === 'conflict') return null;
+      throw error;
+    });
+    if (!mapping) return c.json(profile);
+
+    const sensitiveColumns = new Set<string>();
+    const document = mapping.document as { entities?: Array<{ fields?: Array<{ sourceColumn?: string; sensitive?: boolean }> }> };
+    for (const entity of document.entities ?? []) {
+      for (const field of entity.fields ?? []) {
+        if (field.sensitive && field.sourceColumn) sensitiveColumns.add(field.sourceColumn);
+      }
+    }
+    const redactedProfile = {
+      ...profile,
+      tables: profile.tables.map((table) => ({
+        ...table,
+        columns: table.columns.map((column) =>
+          sensitiveColumns.has(column.name) ? { ...column, topValues: [] } : column,
+        ),
+      })),
+    };
+    return c.json(redactedProfile);
   });
 
   routes.post('/:id/mapping', requireScope('sources:write'), async (c) => {
@@ -142,7 +169,13 @@ export function sourceRoutes(deps: AppBindings) {
       throw GatewayError.validation('Invalid mapping payload', parsed.error.flatten());
     }
 
-    const mapping = await createSourceMapping(db, sourceId, workspaceId, parsed.data);
+    const mapping = await createSourceMapping(
+      db,
+      sourceId,
+      workspaceId,
+      parsed.data,
+      deps.env.DATABASE_URL,
+    );
     return c.json(
       {
         id: mapping.id,

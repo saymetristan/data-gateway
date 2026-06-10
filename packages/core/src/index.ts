@@ -35,7 +35,7 @@ export * from './services/shopify-client.js';
 export * from './services/shopify-scheduled.js';
 export * from './services/source-sync.js';
 export * from './services/raw-records.js';
-export * from './utils/webhook-dedupe.js';
+export * from './services/webhooks.js';
 export * from './providers/embeddings.js';
 export * from './providers/llm.js';
 export * from './queue/boss.js';

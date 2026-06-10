@@ -14,11 +14,16 @@ export async function enqueueShopifyIncrementalSyncs(
     .where(eq(sources.type, 'shopify'));
 
   for (const source of shopifySources) {
-    await enqueueJob(connectionString, SOURCE_SYNC_JOB, {
-      sourceId: source.id,
-      workspaceId: source.workspaceId,
-      fullSync: false,
-    });
+    await enqueueJob(
+      connectionString,
+      SOURCE_SYNC_JOB,
+      {
+        sourceId: source.id,
+        workspaceId: source.workspaceId,
+        fullSync: false,
+      },
+      { singletonKey: `source-sync:${source.id}` },
+    );
   }
 
   return shopifySources.length;

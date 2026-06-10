@@ -4,6 +4,7 @@ export type GatewayErrorCode =
   | 'validation_error'
   | 'unprocessable_entity'
   | 'conflict'
+  | 'rate_limited'
   | 'internal';
 
 const HTTP_STATUS = {
@@ -12,6 +13,7 @@ const HTTP_STATUS = {
   validation_error: 400,
   unprocessable_entity: 422,
   conflict: 409,
+  rate_limited: 429,
   internal: 500,
 } as const;
 
@@ -50,6 +52,10 @@ export class GatewayError extends Error {
 
   static conflict(message: string): GatewayError {
     return new GatewayError('conflict', message);
+  }
+
+  static rateLimited(message = 'Rate limit exceeded'): GatewayError {
+    return new GatewayError('rate_limited', message);
   }
 
   static internal(message = 'Internal server error'): GatewayError {

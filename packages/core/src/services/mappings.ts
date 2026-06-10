@@ -2,6 +2,8 @@ import { and, eq, desc } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { mappings, sources } from '../db/schema/index.js';
 import { GatewayError } from '../errors/gateway-error.js';
+import { enqueueJob } from '../queue/boss.js';
+import { SOURCE_INDEX_JOB } from '../queue/jobs.js';
 import type { CreateMappingInput } from '../schemas/mapping.js';
 import { mappingDocumentSchema } from '../schemas/mapping.js';
 import { validateMappingAgainstProfile } from '../mapping/validate.js';
@@ -13,6 +15,7 @@ export async function createSourceMapping(
   sourceId: string,
   workspaceId: string,
   input: CreateMappingInput,
+  connectionString?: string,
 ) {
   const parsed = mappingDocumentSchema.parse(input.document);
   const profile = await getSourceProfile(db, sourceId);
@@ -64,6 +67,14 @@ export async function createSourceMapping(
     'validated',
     'agent_ready',
   ]);
+
+  if (connectionString) {
+    await enqueueJob(connectionString, SOURCE_INDEX_JOB, {
+      sourceId,
+      workspaceId,
+      invalidateMaturity: true,
+    });
+  }
 
   return created;
 }

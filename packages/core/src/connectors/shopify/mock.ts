@@ -27,6 +27,7 @@ function buildVariant(productId: number, variantIndex: number, product: ShopifyP
   return {
     id: String(productId * 10 + variantIndex + 1),
     productId: String(productId),
+    inventoryItemId: String(productId * 100 + variantIndex + 1),
     sku,
     title: `${product.title} - ${size}`,
     price: Number.parseFloat(price),
@@ -119,6 +120,16 @@ export class MockShopifyClient implements ShopifyClient {
   async fetchProductById(productId: string): Promise<ShopifyProduct | null> {
     await Promise.resolve();
     return this.products.get(productId) ?? null;
+  }
+
+  async fetchProductByInventoryItemId(inventoryItemId: string): Promise<ShopifyProduct | null> {
+    await Promise.resolve();
+    for (const product of this.products.values()) {
+      if (product.variants.some((variant) => variant.inventoryItemId === inventoryItemId)) {
+        return product;
+      }
+    }
+    return null;
   }
 
   async registerWebhooks(): Promise<void> {

@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { mappings, sources } from '../db/schema/index.js';
+import { normalizeShopifyDomain } from '../connectors/shopify/domain.js';
 import type { ShopifyClient } from '../connectors/shopify/types.js';
 import {
   collectionToRawPayload,
@@ -12,7 +13,15 @@ import { GatewayError } from '../errors/gateway-error.js';
 import { enqueueJob } from '../queue/boss.js';
 import { SOURCE_INDEX_JOB, SOURCE_PROFILE_JOB } from '../queue/jobs.js';
 import { getDecryptedSourceConfig, updateSourceConfig } from './sources.js';
-import { deleteRawRecords, removeStaleRawRecords, upsertRawRecord } from './raw-records.js';
+import {
+  deleteRawRecords,
+  removeStaleRawRecords,
+  removeStaleRawRecordsByPrefix,
+  removeStaleVariantRecordsForProduct,
+  upsertRawRecord,
+} from './raw-records.js';
+
+const INCREMENTAL_OVERLAP_MS = 5 * 60 * 1000;
 
 const WEBHOOK_TOPICS = [
   'products/create',
@@ -45,7 +54,9 @@ export async function syncShopifySource(
 
   const config = getDecryptedSourceConfig(source, encryptionKey);
   const syncState = (config.syncState as { lastSyncedAt?: string } | undefined) ?? {};
+  const syncStartedAt = new Date();
   const seenRecordIds = new Set<string>();
+  const seenCollectionRecordIds = new Set<string>();
   let synced = 0;
 
   try {
@@ -57,6 +68,7 @@ export async function syncShopifySource(
       for (const collection of page.items) {
         const sourceRecordId = `collections:${collection.id}`;
         seenRecordIds.add(sourceRecordId);
+        seenCollectionRecordIds.add(sourceRecordId);
         const changed = await upsertRawRecord(
           db,
           sourceId,
@@ -69,7 +81,9 @@ export async function syncShopifySource(
     } while (collectionsCursor);
 
     let productsCursor: string | null | undefined;
-    const updatedAtMin = !options.fullSync ? syncState.lastSyncedAt : undefined;
+    const updatedAtMin = !options.fullSync
+      ? overlappedTimestamp(syncState.lastSyncedAt)
+      : undefined;
     do {
       const page = await client.fetchProducts({
         ...(productsCursor ? { cursor: productsCursor } : {}),
@@ -83,9 +97,11 @@ export async function syncShopifySource(
 
     if (options.fullSync) {
       await removeStaleRawRecords(db, sourceId, seenRecordIds);
+    } else {
+      await removeStaleRawRecordsByPrefix(db, sourceId, 'collections:', seenCollectionRecordIds);
     }
 
-    const lastSyncedAt = new Date().toISOString();
+    const lastSyncedAt = syncStartedAt.toISOString();
     await updateSourceConfig(db, sourceId, workspaceId, { syncState: { lastSyncedAt } }, encryptionKey);
     await db
       .update(sources)
@@ -131,6 +147,12 @@ export async function upsertShopifyProduct(
     ) {
       synced += 1;
     }
+  }
+
+  // With exactly 100 variants the page may be truncated by the GraphQL
+  // `variants(first: 100)` cap; skip cleanup to avoid deleting live variants.
+  if (product.variants.length < 100) {
+    await removeStaleVariantRecordsForProduct(db, sourceId, product.id, new Set(ids.variantIds));
   }
 
   return synced;
@@ -186,7 +208,7 @@ export async function findShopifySourceByDomain(
   db: Database,
   shopDomain: string,
 ): Promise<{ id: string; workspaceId: string; config: unknown } | null> {
-  const normalized = shopDomain.toLowerCase();
+  const normalized = normalizeShopifyDomain(shopDomain);
   const rows = await db
     .select({
       id: sources.id,
@@ -199,11 +221,20 @@ export async function findShopifySourceByDomain(
 
   for (const row of rows) {
     const config = row.config as Record<string, unknown>;
-    const domain = typeof config.shopDomain === 'string' ? config.shopDomain.toLowerCase() : '';
-    if (domain === normalized || domain === `${normalized}.myshopify.com`) {
+    const domain = typeof config.shopDomain === 'string'
+      ? normalizeShopifyDomain(config.shopDomain)
+      : '';
+    if (domain === normalized) {
       return row;
     }
   }
 
   return null;
+}
+
+function overlappedTimestamp(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return undefined;
+  return new Date(Math.max(0, time - INCREMENTAL_OVERLAP_MS)).toISOString();
 }

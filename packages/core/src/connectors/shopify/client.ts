@@ -1,4 +1,5 @@
 import { GatewayError } from '../../errors/gateway-error.js';
+import { normalizeShopifyDomain } from './domain.js';
 import { parseShopifyGid } from './gid.js';
 import type {
   PaginatedResult,
@@ -24,6 +25,15 @@ type GraphqlResponse<T> = {
   };
 };
 
+type ExistingWebhooksResponse = {
+  webhookSubscriptions: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    edges: Array<{
+      node?: { uri?: string | null };
+    }>;
+  };
+};
+
 export class ShopifyGraphqlClient implements ShopifyClient {
   private readonly endpoint: string;
 
@@ -32,7 +42,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
     private readonly accessToken: string,
     private readonly apiVersion: string = DEFAULT_API_VERSION,
   ) {
-    const domain = shopDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const domain = normalizeShopifyDomain(shopDomain);
     this.endpoint = `https://${domain}/admin/api/${apiVersion}/graphql.json`;
   }
 
@@ -77,7 +87,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
                     inventoryQuantity
                     updatedAt
                     selectedOptions { name value }
-                    inventoryItem { unitCost { amount } }
+                    inventoryItem { id unitCost { amount } }
                   }
                 }
               }
@@ -160,7 +170,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
                 inventoryQuantity
                 updatedAt
                 selectedOptions { name value }
-                inventoryItem { unitCost { amount } }
+                inventoryItem { id unitCost { amount } }
               }
             }
           }
@@ -175,19 +185,63 @@ export class ShopifyGraphqlClient implements ShopifyClient {
     return this.normalizeProduct(response.product);
   }
 
+  async fetchProductByInventoryItemId(inventoryItemId: string): Promise<ShopifyProduct | null> {
+    const query = `
+      query FetchProductByInventoryItem($id: ID!) {
+        inventoryItem(id: $id) {
+          variants(first: 1) {
+            edges {
+              node {
+                product { id }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await this.request<{
+      inventoryItem: {
+        variants?: { edges?: Array<{ node?: { product?: { id?: string } | null } | null }> };
+      } | null;
+    }>(query, {
+      id: inventoryItemId.startsWith('gid://')
+        ? inventoryItemId
+        : `gid://shopify/InventoryItem/${inventoryItemId}`,
+    });
+    const productGid = response.inventoryItem?.variants?.edges?.[0]?.node?.product?.id;
+    if (!productGid) return null;
+    return this.fetchProductById(parseShopifyGid(productGid));
+  }
+
   async registerWebhooks(callbackUrl: string, topics: string[]): Promise<void> {
     for (const topic of topics) {
+      const graphqlTopic = toGraphqlWebhookTopic(topic);
+      if (await this.webhookExists(graphqlTopic, callbackUrl)) {
+        continue;
+      }
+
       const mutation = `
-        mutation RegisterWebhook($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
+        mutation RegisterWebhook($topic: WebhookSubscriptionTopic!, $uri: URL!) {
           webhookSubscriptionCreate(
             topic: $topic
-            webhookSubscription: { callbackUrl: $callbackUrl, format: JSON }
+            webhookSubscription: { uri: $uri, format: JSON }
           ) {
             userErrors { field message }
           }
         }
       `;
-      await this.request(mutation, { topic: toGraphqlWebhookTopic(topic), callbackUrl });
+      const response = await this.request<{
+        webhookSubscriptionCreate?: {
+          userErrors?: Array<{ field?: string[] | string | null; message: string }>;
+        };
+      }>(mutation, { topic: graphqlTopic, uri: callbackUrl });
+      const errors = response.webhookSubscriptionCreate?.userErrors ?? [];
+      if (errors.length > 0) {
+        throw GatewayError.unprocessable(
+          `Shopify webhook registration failed: ${errors.map((error) => error.message).join('; ')}`,
+        );
+      }
     }
   }
 
@@ -210,6 +264,35 @@ export class ShopifyGraphqlClient implements ShopifyClient {
       collectionTitles: collections.map((collection) => collection.title),
       variants,
     };
+  }
+
+  private async webhookExists(topic: string, callbackUrl: string): Promise<boolean> {
+    let cursor: string | null = null;
+    do {
+      const query = `
+        query ExistingWebhooks($topics: [WebhookSubscriptionTopic!], $cursor: String) {
+          webhookSubscriptions(first: 100, after: $cursor, topics: $topics) {
+            pageInfo { hasNextPage endCursor }
+            edges {
+              node { uri }
+            }
+          }
+        }
+      `;
+      const response: ExistingWebhooksResponse = await this.request(query, {
+        topics: [topic],
+        cursor,
+      });
+
+      if (response.webhookSubscriptions.edges.some((edge) => edge.node?.uri === callbackUrl)) {
+        return true;
+      }
+      cursor = response.webhookSubscriptions.pageInfo.hasNextPage
+        ? response.webhookSubscriptions.pageInfo.endCursor
+        : null;
+    } while (cursor);
+
+    return false;
   }
 
   private normalizeCollection(node: Record<string, unknown>): ShopifyCollection {
@@ -245,12 +328,15 @@ export class ShopifyGraphqlClient implements ShopifyClient {
       null;
     const color =
       options.find((option) => option.name.toLowerCase() === 'color')?.value ?? null;
-    const unitCostRaw = (node.inventoryItem as { unitCost?: { amount?: string } } | undefined)
-      ?.unitCost?.amount;
+    const inventoryItem = node.inventoryItem as
+      | { id?: string; unitCost?: { amount?: string } }
+      | undefined;
+    const unitCostRaw = inventoryItem?.unitCost?.amount;
 
     return {
       id: parseShopifyGid(String(node.id)),
       productId,
+      inventoryItemId: inventoryItem?.id ? parseShopifyGid(inventoryItem.id) : null,
       sku: toStringValue(node.sku),
       title: toStringValue(node.title),
       price: Number(node.price ?? 0),

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { sourceProfiles, sourceRecordsRaw, sources } from '../db/schema/index.js';
 import { GatewayError } from '../errors/gateway-error.js';
@@ -8,8 +8,20 @@ import { toScalarString } from '../utils/scalar.js';
 
 const MAX_PROFILE_ROWS_PER_SOURCE = 10_000;
 
-export async function profileSource(db: Database, sourceId: string): Promise<SourceProfileDocument> {
-  const [source] = await db.select().from(sources).where(eq(sources.id, sourceId)).limit(1);
+export async function profileSource(
+  db: Database,
+  sourceId: string,
+  workspaceId?: string,
+): Promise<SourceProfileDocument> {
+  const [source] = await db
+    .select()
+    .from(sources)
+    .where(
+      workspaceId
+        ? and(eq(sources.id, sourceId), eq(sources.workspaceId, workspaceId))
+        : eq(sources.id, sourceId),
+    )
+    .limit(1);
   if (!source) {
     throw GatewayError.notFound('Source not found');
   }

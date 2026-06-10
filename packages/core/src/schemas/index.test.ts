@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createWorkspaceSchema, createSourceSchema } from '../schemas/index.js';
+import { createMappingSchema } from './mapping.js';
 
 describe('schemas', () => {
   it('validates workspace input', () => {
@@ -27,5 +28,69 @@ describe('schemas', () => {
       },
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it('rejects sensitive searchable or filterable mapping fields', () => {
+    const parsed = createMappingSchema.safeParse({
+      document: {
+        entities: [
+          {
+            entity: 'variant',
+            sourceTable: 'variants',
+            fields: [
+              {
+                name: 'cost',
+                sourceColumn: 'cost',
+                type: 'number',
+                searchable: false,
+                filterable: true,
+                visible: false,
+                sensitive: true,
+              },
+            ],
+            rules: [],
+            defaultFilters: [],
+            embeddingTextTemplate: '{{cost}}',
+          },
+        ],
+      },
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects rules that mix conditions and legacy condition shape', () => {
+    const parsed = createMappingSchema.safeParse({
+      document: {
+        entities: [
+          {
+            entity: 'variant',
+            sourceTable: 'variants',
+            fields: [
+              {
+                name: 'sku',
+                sourceColumn: 'sku',
+                type: 'string',
+                searchable: true,
+                filterable: true,
+                visible: true,
+                sensitive: false,
+              },
+            ],
+            rules: [
+              {
+                field: 'available',
+                op: 'eq',
+                column: 'status',
+                value: 'active',
+                conditions: [{ column: 'stock', op: 'gt', value: 0 }],
+              },
+            ],
+            defaultFilters: [],
+            embeddingTextTemplate: '{{sku}}',
+          },
+        ],
+      },
+    });
+    expect(parsed.success).toBe(false);
   });
 });

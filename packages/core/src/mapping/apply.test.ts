@@ -60,4 +60,31 @@ describe('mapping apply', () => {
     ]);
     expect(text).toBe('A - SKU-1');
   });
+
+  it('no incluye campos sensitive en search source aunque estén marcados searchable', () => {
+    const text = buildSearchSource(
+      { name: 'Producto', cost: 12.5 },
+      [
+        {
+          name: 'name',
+          sourceColumn: 'name',
+          type: 'string',
+          searchable: true,
+          filterable: false,
+          visible: true,
+          sensitive: false,
+        },
+        {
+          name: 'cost',
+          sourceColumn: 'cost',
+          type: 'number',
+          searchable: true,
+          filterable: false,
+          visible: false,
+          sensitive: true,
+        },
+      ],
+    );
+    expect(text).toBe('Producto');
+  });
 });

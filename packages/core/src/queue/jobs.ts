@@ -28,6 +28,7 @@ export type ShopifyWebhookJobData = {
   workspaceId: string;
   topic: string;
   payload: Record<string, unknown>;
+  webhookId?: string;
 };
 
 export type EmbeddingsGenerateJobData = {
