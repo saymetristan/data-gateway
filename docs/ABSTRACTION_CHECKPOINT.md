@@ -99,6 +99,8 @@
 - Rol `gateway_app` (`NOBYPASSRLS`): la API hace `SET LOCAL ROLE gateway_app` + `set_config('app.workspace_id', ..., true)` en transacción
 - `postgres` local tiene `BYPASSRLS` — sin `SET ROLE` las policies no aplican aunque existan
 - Upgrade path: usuario de conexión dedicado miembro de `gateway_app` sin `BYPASSRLS` en prod
+- Supabase prod: el rol `gateway_app` existe (creado vía MCP con `CREATE ROLE` plano; los bloques `DO $$` con `CREATE ROLE` cortan la conexión). `setWorkspaceContext` hace fallback a solo `app.workspace_id` si el rol no existe (`workspaceRlsRoleExists`).
+- Verificado en Supabase: `SET LOCAL ROLE gateway_app` + `app.workspace_id` ajeno → 0 filas visibles en `workspaces`.
 
 ## Re-embed por cambio de modelo
 
