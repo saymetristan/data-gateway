@@ -55,7 +55,7 @@ Si `GATEWAY_API_KEY` no está configurada, el servidor corre en modo multi-tenan
 
 Configura en Whaapy:
 
-- URL: `https://mcp-production-91e6.up.railway.app/mcp`
+- URL: `https://mcp.data.whaapy.com/mcp`
 - Transporte: Streamable HTTP
 - Auth: `bearer`
 - Token: API key del workspace (`dgw_...`) con scopes `tools:read` y `tools:invoke`
