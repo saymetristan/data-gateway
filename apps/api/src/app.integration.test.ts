@@ -45,6 +45,8 @@ describe.runIf(hasDatabase)('API integration', () => {
       EMBEDDING_DIMENSIONS: 1024,
       LLM_MODEL: 'mock-llm',
       USE_MOCK_PROVIDERS: true,
+      RATE_LIMIT_MAX: 0,
+      RATE_LIMIT_WINDOW_MS: 60_000,
     };
     app = createApp({
       env,

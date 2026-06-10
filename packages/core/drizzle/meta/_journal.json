@@ -36,6 +36,20 @@
       "when": 1781060186792,
       "tag": "0004_equal_exodus",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781065000000,
+      "tag": "0005_workspace_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781066000000,
+      "tag": "0006_gateway_rls_role",
+      "breakpoints": true
     }
   ]
 }

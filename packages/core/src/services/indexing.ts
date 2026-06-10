@@ -32,6 +32,7 @@ const RAW_BATCH_SIZE = 500;
 
 export type IndexSourceOptions = {
   invalidateMaturity?: boolean;
+  embeddingModel?: string;
 };
 
 export async function indexSource(
@@ -143,8 +144,25 @@ export async function indexSource(
     offset += rawRows.length;
   }
 
-  for (let i = 0; i < recordIdsForEmbedding.length; i += EMBEDDING_BATCH_SIZE) {
-    const batch = recordIdsForEmbedding.slice(i, i + EMBEDDING_BATCH_SIZE);
+  const embeddingRecordIds = [...recordIdsForEmbedding];
+  if (options.embeddingModel) {
+    const missingIds = await findRecordsMissingActiveEmbeddings(
+      db,
+      sourceId,
+      mapping.version,
+      options.embeddingModel,
+    );
+    const seen = new Set(embeddingRecordIds);
+    for (const recordId of missingIds) {
+      if (!seen.has(recordId)) {
+        embeddingRecordIds.push(recordId);
+        seen.add(recordId);
+      }
+    }
+  }
+
+  for (let i = 0; i < embeddingRecordIds.length; i += EMBEDDING_BATCH_SIZE) {
+    const batch = embeddingRecordIds.slice(i, i + EMBEDDING_BATCH_SIZE);
     await enqueueJob(connectionString, EMBEDDINGS_GENERATE_JOB, {
       sourceId,
       workspaceId,
@@ -164,22 +182,54 @@ export async function indexSource(
     await maybeTransitionSourceMaturity(db, sourceId, 'indexed', 'source_indexed', ['mapped']);
   }
 
-  await purgeOldEmbeddingsForSource(db, sourceId, mapping.version);
+  await purgeOldEmbeddingsForSource(
+    db,
+    sourceId,
+    mapping.version,
+    options.embeddingModel,
+  );
 
   return {
     indexed,
-    embeddingJobs: Math.ceil(recordIdsForEmbedding.length / EMBEDDING_BATCH_SIZE),
+    embeddingJobs: Math.ceil(embeddingRecordIds.length / EMBEDDING_BATCH_SIZE),
   };
+}
+
+export async function findRecordsMissingActiveEmbeddings(
+  db: Database,
+  sourceId: string,
+  mappingVersion: number,
+  embeddingModel: string,
+): Promise<string[]> {
+  const rows = await db
+    .select({ id: records.id })
+    .from(records)
+    .leftJoin(
+      recordEmbeddings,
+      and(
+        eq(recordEmbeddings.recordId, records.id),
+        eq(recordEmbeddings.embeddingModel, embeddingModel),
+        eq(recordEmbeddings.mappingVersion, mappingVersion),
+      ),
+    )
+    .where(
+      and(
+        eq(records.sourceId, sourceId),
+        eq(records.mappingVersion, mappingVersion),
+        sql`${recordEmbeddings.id} IS NULL`,
+      ),
+    );
+
+  return rows.map((row) => row.id);
 }
 
 async function purgeOldEmbeddingsForSource(
   db: Database,
   sourceId: string,
   activeMappingVersion: number,
+  activeEmbeddingModel?: string,
 ): Promise<void> {
-  // Only purge an old-version embedding once its record already has an
-  // active-version embedding, so search never has an empty window.
-  const rows = await db
+  const staleVersionRows = await db
     .select({ embeddingId: recordEmbeddings.id })
     .from(recordEmbeddings)
     .innerJoin(records, eq(records.id, recordEmbeddings.recordId))
@@ -195,8 +245,31 @@ async function purgeOldEmbeddingsForSource(
       ),
     );
 
-  if (rows.length === 0) return;
-  await db.delete(recordEmbeddings).where(inArray(recordEmbeddings.id, rows.map((row) => row.embeddingId)));
+  const idsToDelete = staleVersionRows.map((row) => row.embeddingId);
+
+  if (activeEmbeddingModel) {
+    const staleModelRows = await db
+      .select({ embeddingId: recordEmbeddings.id })
+      .from(recordEmbeddings)
+      .innerJoin(records, eq(records.id, recordEmbeddings.recordId))
+      .where(
+        and(
+          eq(records.sourceId, sourceId),
+          sql`${recordEmbeddings.embeddingModel} <> ${activeEmbeddingModel}`,
+          sql`EXISTS (
+            SELECT 1 FROM record_embeddings AS active_emb
+            WHERE active_emb.record_id = ${recordEmbeddings.recordId}
+              AND active_emb.embedding_model = ${activeEmbeddingModel}
+              AND active_emb.mapping_version = ${activeMappingVersion}
+          )`,
+        ),
+      );
+    idsToDelete.push(...staleModelRows.map((row) => row.embeddingId));
+  }
+
+  const uniqueIds = [...new Set(idsToDelete)];
+  if (uniqueIds.length === 0) return;
+  await db.delete(recordEmbeddings).where(inArray(recordEmbeddings.id, uniqueIds));
 }
 
 export async function generateEmbeddingsForRecords(

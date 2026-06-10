@@ -23,6 +23,8 @@ export const apiEnvSchema = z.object({
     .optional()
     .transform((value) => value === 'true'),
   PUBLIC_API_URL: z.string().url().optional(),
+  RATE_LIMIT_MAX: z.coerce.number().int().nonnegative().default(120),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

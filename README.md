@@ -1,5 +1,39 @@
 # Data Gateway
 
+Capa de infraestructura que convierte fuentes de negocio (database URL, Shopify, CSV) en tools consultables por agentes de IA con búsqueda híbrida determinística, evals como gate y manifest MCP.
+
+## Arquitectura
+
+```mermaid
+flowchart TB
+  subgraph ingest [Ingesta]
+    Connectors[Connectors DB/Shopify/CSV]
+    Raw[source_records_raw]
+    Profile[source_profiles]
+    Mapping[mappings versionados]
+    Records[records JSONB]
+    Embeddings[record_embeddings HNSW]
+  end
+  subgraph queryPath [Query]
+    Extract[extract-filters determinístico]
+    Hybrid[lexical + vector + RRF]
+    QueryAPI[POST /query]
+  end
+  subgraph agentLayer [Capa agente]
+    Compiler[tool compiler]
+    ToolsAPI[GET /tools + POST /tools/:name/invoke]
+    McpServer[packages/mcp-server]
+  end
+  Connectors --> Raw --> Profile --> Mapping --> Records --> Embeddings
+  Records --> Hybrid
+  Embeddings --> Hybrid
+  Extract --> Hybrid --> QueryAPI
+  Mapping --> Compiler --> ToolsAPI --> McpServer
+  ToolsAPI --> Hybrid
+```
+
+Madurez de fuente: `connected → profiled → mapped → indexed → validated → agent_ready` (evals + activación explícita).
+
 ## Local development
 
 ```bash
@@ -242,3 +276,64 @@ Env API adicional: `PUBLIC_API_URL` (URL pública para callback de webhooks).
 
 Fixtures: `fixtures/shopify-mapping.json`, `fixtures/shopify-evals.json` (18 cases).
 Checkpoint: `docs/ABSTRACTION_CHECKPOINT.md`.
+
+## MCP / Tools (Fase 6)
+
+Solo fuentes `agent_ready` aparecen en el manifest. El workspace sale de la API key (no va en la URL).
+
+```bash
+# Manifest de tools (JSON Schema por tool)
+curl http://localhost:3000/tools \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY"
+
+# Invocar tool compilada
+curl -X POST http://localhost:3000/tools/search_variant/invoke \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"args":{"query":"playeras rojas","color":"rojo","limit":5}}'
+```
+
+Scopes: `tools:read`, `tools:invoke` (keys con `*` incluyen todo).
+
+MCP server de referencia (`packages/mcp-server`): stdio o Streamable HTTP consumiendo solo la API REST. Ver `packages/mcp-server/README.md`.
+
+Dogfooding local sin credenciales: `DOGFOOD_DRY_RUN=true pnpm dogfood`.
+
+## Operación (Fase 7)
+
+### Rate limiting
+
+Por API key, in-memory (fixed window). Configurable:
+
+| Variable | Default | Notas |
+|----------|---------|-------|
+| `RATE_LIMIT_MAX` | 120 | Requests por ventana; `0` desactiva |
+| `RATE_LIMIT_WINDOW_MS` | 60000 | Ventana en ms |
+
+Headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After` en 429.
+
+### Query logs
+
+```bash
+curl "http://localhost:3000/query-logs?maxConfidence=0.5&limit=20" \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY"
+```
+
+Scope: `logs:read`. Filtros: `from`, `to`, `queryType`, `maxConfidence`, `sourceId`, `onlyErrors`, `cursor`.
+
+### Métricas (admin)
+
+```bash
+curl http://localhost:3000/metrics \
+  -H "Authorization: Bearer $ADMIN_API_KEY"
+```
+
+Incluye p50/p95 de latencia de query (24h), tamaño de colas pg-boss y estado de webhooks/fuentes.
+
+### RLS (defensa en profundidad)
+
+Postgres RLS por `workspace_id` con `FORCE` en tablas tenant. La API hace `SET LOCAL ROLE gateway_app` + `app.workspace_id` en transacción por request workspace (`gateway_app` no tiene `BYPASSRLS`; `postgres` local sí). Worker/admin corren sin contexto (acceso total). Upgrade path documentado en `docs/ABSTRACTION_CHECKPOINT.md`.
+
+### Reindexación por cambio de modelo
+
+`POST /sources/:id/index` detecta records sin embedding del `(EMBEDDING_MODEL, mappingVersion)` activo y los re-encola aunque el record no haya cambiado. Purga embeddings de modelos/versiones viejas solo cuando ya existe el activo.

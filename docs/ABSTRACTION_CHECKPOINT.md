@@ -87,3 +87,27 @@
 
 - `ToolKind` registry en compiler para nuevos tipos de tool
 - `description` opcional en `mappingFieldSchema` y `mappingEntitySchema` para schemas MCP más ricos
+
+---
+
+# Abstraction Checkpoint — Fase 7 (Hardening y Operación)
+
+## RLS por workspace
+
+- Migración `0005_workspace_rls.sql`: `ENABLE` + `FORCE ROW LEVEL SECURITY` en 15 tablas tenant
+- Policy permissive: si `app.workspace_id` no está seteado → acceso total (worker, admin, migraciones)
+- Rol `gateway_app` (`NOBYPASSRLS`): la API hace `SET LOCAL ROLE gateway_app` + `set_config('app.workspace_id', ..., true)` en transacción
+- `postgres` local tiene `BYPASSRLS` — sin `SET ROLE` las policies no aplican aunque existan
+- Upgrade path: usuario de conexión dedicado miembro de `gateway_app` sin `BYPASSRLS` en prod
+
+## Re-embed por cambio de modelo
+
+- `indexSource({ embeddingModel })` detecta records sin embedding del par `(modelo activo, mappingVersion activa)`
+- `purgeOldEmbeddingsForSource` también purga modelos viejos cuando ya existe el activo (sin ventana vacía)
+- Worker pasa `embeddingProvider.model` al index job
+
+## Operación
+
+- Rate limit in-memory por API key (`RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MS`; `0` desactiva)
+- `GET /query-logs` — scope `logs:read`, filtros + cursor
+- `GET /metrics` — admin-only, p50/p95 query, colas pg-boss, estado sync

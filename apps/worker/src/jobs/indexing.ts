@@ -26,6 +26,7 @@ export function registerIndexingJobs(boss: PgBoss, env: WorkerEnv): void {
     try {
       await indexSource(db, data.sourceId, data.workspaceId, env.DATABASE_URL, llmProvider, {
         invalidateMaturity: data.invalidateMaturity ?? true,
+        embeddingModel: embeddingProvider.model,
       });
     } finally {
       await pool.end();

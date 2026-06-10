@@ -4,13 +4,17 @@ import { GatewayError, gatewayErrorToHttp, pingDb } from '@data-gateway/core';
 import type { ApiEnv } from './env.js';
 import { requestLogger } from './middleware/common.js';
 import { adminAuth, workspaceAuth } from './middleware/auth.js';
+import { rlsContext } from './middleware/rls.js';
+import { createRateLimiter } from './middleware/rate-limit.js';
 import { healthRoutes } from './routes/health.js';
 import { workspaceRoutes } from './routes/workspaces.js';
 import { sourceRoutes } from './routes/sources.js';
 import { queryRoutes } from './routes/query.js';
+import { queryLogRoutes } from './routes/query-logs.js';
 import { evalRoutes } from './routes/evals.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { toolRoutes } from './routes/tools.js';
+import { metricsRoutes } from './routes/metrics.js';
 
 export type AppVariables = {
   db: Database;
@@ -26,8 +30,24 @@ export type AppBindings = {
   llmProvider: LlmProvider;
 };
 
+function useWorkspaceProtection(
+  app: Hono<{ Variables: AppVariables }>,
+  paths: string[],
+  rateLimiter: ReturnType<typeof createRateLimiter>,
+): void {
+  for (const path of paths) {
+    app.use(path, workspaceAuth());
+    app.use(path, rateLimiter);
+    app.use(path, rlsContext());
+  }
+}
+
 export function createApp(deps: AppBindings) {
   const app = new Hono<{ Variables: AppVariables }>();
+  const rateLimiter = createRateLimiter({
+    max: deps.env.RATE_LIMIT_MAX,
+    windowMs: deps.env.RATE_LIMIT_WINDOW_MS,
+  });
 
   app.onError((error, c) => {
     if (error instanceof GatewayError) {
@@ -53,21 +73,23 @@ export function createApp(deps: AppBindings) {
   app.use('/workspaces/*', adminAuth(deps.env.ADMIN_API_KEY));
   app.route('/', workspaceRoutes());
 
-  app.use('/sources', workspaceAuth());
-  app.use('/sources/*', workspaceAuth());
+  useWorkspaceProtection(app, ['/sources', '/sources/*'], rateLimiter);
   app.route('/sources', sourceRoutes(deps));
 
-  app.use('/query', workspaceAuth());
-  app.use('/query/*', workspaceAuth());
+  useWorkspaceProtection(app, ['/query', '/query/*'], rateLimiter);
   app.route('/query', queryRoutes(deps));
 
-  app.use('/evals', workspaceAuth());
-  app.use('/evals/*', workspaceAuth());
+  useWorkspaceProtection(app, ['/query-logs', '/query-logs/*'], rateLimiter);
+  app.route('/query-logs', queryLogRoutes());
+
+  useWorkspaceProtection(app, ['/evals', '/evals/*'], rateLimiter);
   app.route('/evals', evalRoutes(deps));
 
-  app.use('/tools', workspaceAuth());
-  app.use('/tools/*', workspaceAuth());
+  useWorkspaceProtection(app, ['/tools', '/tools/*'], rateLimiter);
   app.route('/tools', toolRoutes(deps));
+
+  app.use('/metrics', adminAuth(deps.env.ADMIN_API_KEY));
+  app.route('/metrics', metricsRoutes(deps));
 
   app.route('/webhooks', webhookRoutes(deps));
 
