@@ -192,12 +192,11 @@ function buildSearchTool(input: CompileToolsInput): ToolDefinition | null {
   }
 
   const entitySlug = slugifyToolName(input.entity.entity);
+  const filterNames = targets.map((target) => target.name);
   return {
     name: `search_${entitySlug}`,
     kind: 'search',
-    description:
-      input.entity.description ??
-      `Buscar registros de ${input.entity.entity}${input.workspaceName ? ` en ${input.workspaceName}` : ''}`,
+    description: buildSearchDescription(input, filterNames),
     entity: input.entity.entity,
     sourceIds: [...input.sourceIds],
     mappingVersion: input.mappingVersion,
@@ -232,9 +231,7 @@ function buildCheckAvailabilityTool(input: CompileToolsInput): ToolDefinition | 
   return {
     name: `check_availability_${entitySlug}`,
     kind: 'check_availability',
-    description:
-      input.entity.description ??
-      `Verificar disponibilidad de ${input.entity.entity}${input.workspaceName ? ` en ${input.workspaceName}` : ''}`,
+    description: buildAvailabilityDescription(input, identifier.name),
     entity: input.entity.entity,
     sourceIds: [...input.sourceIds],
     mappingVersion: input.mappingVersion,
@@ -250,6 +247,31 @@ function buildCheckAvailabilityTool(input: CompileToolsInput): ToolDefinition | 
       availabilityField: booleanTargets[0]?.name ?? 'available',
     },
   };
+}
+
+function buildSearchDescription(input: CompileToolsInput, filterNames: string[]): string {
+  const entityLabel = input.entity.description ?? input.entity.entity;
+  const workspaceSuffix = input.workspaceName ? ` en ${input.workspaceName}` : '';
+  const filters = filterNames.length > 0 ? filterNames.join(', ') : 'los filtros disponibles';
+  return [
+    `Busca ${entityLabel}${workspaceSuffix} usando texto libre y filtros estructurados (${filters}).`,
+    `When to use: cuando el cliente quiere encontrar, comparar o filtrar ${input.entity.entity} por características, identificadores, disponibilidad o precio.`,
+    'Never use for: modificar datos, confirmar compras, reservar, cobrar, cancelar pedidos o prometer disponibilidad sin resultados de la herramienta.',
+    'Success criteria: ok=true, status=success y data.results contiene resultados relevantes; usa los campos devueltos como fuente de verdad.',
+    'Fallback: si status=needs_more_info o no hay resultados, pide más detalle al cliente en vez de inventar datos.',
+  ].join('\n');
+}
+
+function buildAvailabilityDescription(input: CompileToolsInput, identifierName: string): string {
+  const entityLabel = input.entity.description ?? input.entity.entity;
+  const workspaceSuffix = input.workspaceName ? ` en ${input.workspaceName}` : '';
+  return [
+    `Verifica disponibilidad de ${entityLabel}${workspaceSuffix} por ${identifierName}.`,
+    `When to use: cuando el cliente pregunta si un ${input.entity.entity} específico está disponible o en stock y ya hay un identificador como ${identifierName}.`,
+    `Never use for: búsquedas amplias sin identificador; en ese caso usa search_${slugifyToolName(input.entity.entity)} primero.`,
+    'Success criteria: ok=true, status=success y data contiene el estado de disponibilidad del registro consultado.',
+    'Fallback: si falta identificador o no hay coincidencia, pide SKU, nombre exacto u otro dato verificable.',
+  ].join('\n');
 }
 
 function getFilterableTargets(entity: MappingEntity): FilterableTarget[] {

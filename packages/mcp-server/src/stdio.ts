@@ -5,6 +5,9 @@ import { createGatewayMcpServer } from './server.js';
 
 async function main(): Promise<void> {
   const env = loadMcpEnv();
+  if (!env.GATEWAY_API_KEY) {
+    throw new Error('GATEWAY_API_KEY is required for stdio mode');
+  }
   const client = new GatewayClient({
     gatewayUrl: env.GATEWAY_URL,
     apiKey: env.GATEWAY_API_KEY,

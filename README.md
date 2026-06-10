@@ -36,10 +36,21 @@ Madurez de fuente: `connected → profiled → mapped → indexed → validated 
 
 ## Producción
 
-- API: `https://api-production-4d24.up.railway.app` (dominio objetivo: `data.whaapy.com`, requiere CNAME `data` → `txsivm0h.up.railway.app`)
-- Railway proyecto `data-gateway`: servicios `api` (build `pnpm --filter @data-gateway/core build && pnpm --filter @data-gateway/api build`, start `node apps/api/dist/index.js`, healthcheck `/health`) y `worker` (ídem con `@data-gateway/worker`, sin dominio)
+- API: `https://api-production-4d24.up.railway.app` (`https://data.whaapy.com` cuando el DNS custom esté activo)
+- MCP Whaapy-compatible: `https://mcp-production-91e6.up.railway.app/mcp` (Streamable HTTP, auth bearer con API key de workspace)
+- Railway proyecto `data-gateway`: servicios `api` (build `pnpm --filter @data-gateway/core build && pnpm --filter @data-gateway/api build`, start `node apps/api/dist/index.js`, healthcheck `/health`), `worker` (ídem con `@data-gateway/worker`, sin dominio) y `mcp` (build `pnpm --filter @data-gateway/core build && pnpm --filter @data-gateway/mcp-server build`, start `node packages/mcp-server/dist/http.js`)
 - DB: Supabase `data-ingest` vía session pooler (`aws-1-us-east-1.pooler.supabase.com:5432`; pg-boss requiere session mode)
 - Deploy manual: `railway up --service api|worker` desde la raíz; migraciones SIEMPRE vía MCP `data-gateway-supabase` (nunca `db:migrate` contra prod)
+
+### Whaapy MCP
+
+En Whaapy, agrega un MCP con:
+
+- URL: `https://mcp-production-91e6.up.railway.app/mcp`
+- Auth: bearer token = API key de workspace (`tools:read` + `tools:invoke`)
+- Protocolo: Streamable HTTP (`MCP-Protocol-Version: 2025-06-18`)
+
+El server traduce `tools/list` a `GET /tools` y `tools/call` a `POST /tools/:name/invoke`. Los clientes que necesiten combinar tools propias pueden extender `packages/mcp-server`; ver `packages/mcp-server/README.md`.
 
 ## Local development
 

@@ -115,6 +115,10 @@ describe('tool compiler', () => {
     const search = tools.find((tool) => tool.name === 'search_variant');
     expect(search).toBeDefined();
     expect(search?.description).toContain('Variantes de producto Shopify');
+    expect(search?.description).toContain('When to use:');
+    expect(search?.description).toContain('Never use for:');
+    expect(search?.description).toContain('Success criteria:');
+    expect(search?.description).toContain('Fallback:');
     expect(search?.inputSchema).toMatchObject({
       type: 'object',
       additionalProperties: false,
@@ -138,6 +142,8 @@ describe('tool compiler', () => {
 
     const availability = tools.find((tool) => tool.name === 'check_availability_variant');
     expect(availability).toBeDefined();
+    expect(availability?.description).toContain('When to use:');
+    expect(availability?.description).toContain('Never use for:');
     expect(availability?.inputSchema.required).toEqual(['sku']);
   });
 
