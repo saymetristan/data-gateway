@@ -23,6 +23,7 @@ export default tseslint.config(
       '**/drizzle.config.ts',
       '**/*.test.ts',
       '**/test/**',
+      'scripts/**',
     ],
   },
 );

@@ -88,10 +88,8 @@ export async function resolveApiKey(db: Database, rawKey: string) {
     .set({ lastUsedAt: new Date(), updatedAt: new Date() })
     .where(eq(apiKeys.id, row.id));
 
-  return {
-    ...row,
-    scopes: row.scopes.length > 0 ? row.scopes : ['*'],
-  };
+  // Una key sin scopes no tiene permisos; el acceso total requiere scope '*' explícito.
+  return row;
 }
 
 export async function createSourceUnsafeForTests(

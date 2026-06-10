@@ -33,6 +33,13 @@ export type ExecuteQueryInput = {
   request: QueryRequest;
   embeddingProvider: EmbeddingProvider;
   llmProvider?: LlmProvider;
+  requiredMaturity?: 'agent_ready';
+  allowedSourceIds?: string[];
+  presetFilters?: NormalizedFilter[];
+  logContext?: {
+    toolName?: string;
+    mappingVersion?: number;
+  };
 };
 
 type QueryableSource = {
@@ -52,7 +59,13 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
   let errorMessage: string | undefined;
 
   try {
-    const queryable = await resolveQueryableSources(input.db, input.workspaceId, input.request.sourceId);
+    const queryable = await resolveQueryableSources(
+      input.db,
+      input.workspaceId,
+      input.request.sourceId,
+      input.requiredMaturity,
+      input.allowedSourceIds,
+    );
     if (queryable.length === 0) {
       throw GatewayError.conflict('No queryable sources found for workspace');
     }
@@ -100,13 +113,16 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
 
     const defaultFilters = collectDefaultFilters(queryable, entityFilter);
     const mergedFilters = mergeFilters(
-      extractedFilters,
+      [...extractedFilters, ...(input.presetFilters ?? [])],
       requestFiltersToNormalized(input.request.filters),
       defaultFilters,
     );
 
     const filterableFields = collectFilterableFields(queryable, entityFilter);
     for (const filter of defaultFilters) {
+      filterableFields.add(filter.field);
+    }
+    for (const filter of input.presetFilters ?? []) {
       filterableFields.add(filter.field);
     }
     const safeFilters = mergedFilters.filter((filter) => {
@@ -171,7 +187,14 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
 
     await writeQueryLog(input, {
       rawQuery: input.request.query,
-      structuredQuery: { extracted: extractedFilters, unresolvedText },
+      structuredQuery: {
+        extracted: extractedFilters,
+        unresolvedText,
+        ...(input.logContext?.toolName ? { toolName: input.logContext.toolName } : {}),
+        ...(input.logContext?.mappingVersion !== undefined
+          ? { mappingVersion: input.logContext.mappingVersion }
+          : {}),
+      },
       queryType,
       appliedFilters,
       resultsCount,
@@ -205,6 +228,8 @@ async function resolveQueryableSources(
   db: Database,
   workspaceId: string,
   sourceId?: string,
+  requiredMaturity?: 'agent_ready',
+  allowedSourceIds?: string[],
 ): Promise<QueryableSource[]> {
   const rows = await db
     .select()
@@ -215,9 +240,15 @@ async function resolveQueryableSources(
         : eq(sources.workspaceId, workspaceId),
     );
 
+  const allowed = allowedSourceIds ? new Set(allowedSourceIds) : null;
   const queryable: QueryableSource[] = [];
   for (const source of rows) {
-    if (!QUERYABLE_MATURITY.has(source.maturityStatus)) continue;
+    if (allowed && !allowed.has(source.id)) continue;
+    if (requiredMaturity) {
+      if (source.maturityStatus !== requiredMaturity) continue;
+    } else if (!QUERYABLE_MATURITY.has(source.maturityStatus)) {
+      continue;
+    }
 
     try {
       const mapping = await getActiveMapping(db, source.id);

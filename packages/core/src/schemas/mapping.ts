@@ -7,6 +7,7 @@ export const mappingFieldSchema = z
     name: z.string().min(1),
     sourceColumn: z.string().min(1),
     type: mappingFieldTypeSchema,
+    description: z.string().optional(),
     searchable: z.boolean().default(false),
     filterable: z.boolean().default(false),
     visible: z.boolean().default(true),
@@ -69,6 +70,7 @@ export const mappingEnrichmentSchema = z.object({
 
 export const mappingEntitySchema = z.object({
   entity: z.string().min(1),
+  description: z.string().optional(),
   sourceTable: z.string().min(1),
   fields: z.array(mappingFieldSchema).min(1),
   rules: z.array(mappingRuleSchema).default([]),

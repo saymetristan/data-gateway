@@ -47,3 +47,43 @@
 - Catálogos >10k productos: Bulk Operations API
 - OAuth público: fuera de MVP (custom app token only)
 - Dedupe webhook: LRU in-memory → tabla `webhook_events` si multi-instancia API
+
+---
+
+# Abstraction Checkpoint — Fase 6 (Tool Compiler + MCP)
+
+## Nuevas piezas
+
+### Tool compiler (`packages/core/src/tools/compiler.ts`)
+
+- Compila `MappingEntity` + `SourceProfileDocument` → `ToolDefinition[]` (`search_<entity>`, `check_availability_<entity>`)
+- Enums de parámetros desde `topValues` reales del profiling
+- Sin tabla persistida: manifest on-the-fly versionado por `mappingVersion`
+
+### Capa tools (`packages/core/src/services/tools.ts`)
+
+- `getToolManifest(workspaceId)` — solo fuentes `agent_ready`
+- `invokeTool` — valida args, traduce a `executeQuery` con `requiredMaturity: 'agent_ready'` y `allowedSourceIds`
+- Logging en `query_logs.structuredQuery.toolName`
+
+### API
+
+- `GET /tools` — scope `tools:read` (workspace desde API key)
+- `POST /tools/:name/invoke` — scope `tools:invoke`
+- Desviación documentada: no `GET /workspaces/:id/tools` (ruta admin-only incompatible con MCP)
+
+### MCP server (`packages/mcp-server`)
+
+- Consume solo REST; nunca importa `@data-gateway/core`
+- Transportes: stdio + Streamable HTTP (`/mcp`)
+
+## Sin cambios (reutilizado)
+
+- `executeQuery` como motor de ejecución (default filters, shaping, confidence)
+- Query path existente `/query` sigue aceptando `indexed|validated|agent_ready`
+- Mapping document + profiling + eval gate antes de `agent_ready`
+
+## Extensibilidad
+
+- `ToolKind` registry en compiler para nuevos tipos de tool
+- `description` opcional en `mappingFieldSchema` y `mappingEntitySchema` para schemas MCP más ricos

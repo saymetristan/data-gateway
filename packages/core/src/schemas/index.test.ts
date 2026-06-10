@@ -58,6 +58,36 @@ describe('schemas', () => {
     expect(parsed.success).toBe(false);
   });
 
+  it('accepts mapping descriptions on entity and fields', () => {
+    const parsed = createMappingSchema.safeParse({
+      document: {
+        entities: [
+          {
+            entity: 'variant',
+            description: 'Variantes de producto',
+            sourceTable: 'variants',
+            fields: [
+              {
+                name: 'sku',
+                sourceColumn: 'sku',
+                type: 'string',
+                description: 'SKU',
+                searchable: true,
+                filterable: true,
+                visible: true,
+                sensitive: false,
+              },
+            ],
+            rules: [],
+            defaultFilters: [],
+            embeddingTextTemplate: '{{sku}}',
+          },
+        ],
+      },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
   it('rejects rules that mix conditions and legacy condition shape', () => {
     const parsed = createMappingSchema.safeParse({
       document: {

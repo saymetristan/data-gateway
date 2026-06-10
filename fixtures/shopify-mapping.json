@@ -2,17 +2,18 @@
   "entities": [
     {
       "entity": "variant",
+      "description": "Variantes de producto Shopify con precio, inventario y atributos",
       "sourceTable": "variants",
       "fields": [
-        { "name": "sku", "sourceColumn": "sku", "type": "string", "searchable": true, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "title", "sourceColumn": "title", "type": "string", "searchable": true, "filterable": false, "visible": true, "sensitive": false },
-        { "name": "productTitle", "sourceColumn": "productTitle", "type": "string", "searchable": true, "filterable": false, "visible": true, "sensitive": false },
-        { "name": "price", "sourceColumn": "price", "type": "number", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "inventoryQuantity", "sourceColumn": "inventoryQuantity", "type": "number", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "size", "sourceColumn": "size", "type": "string", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "color", "sourceColumn": "color", "type": "string", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "collections", "sourceColumn": "collections", "type": "string", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "status", "sourceColumn": "status", "type": "string", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "sku", "sourceColumn": "sku", "type": "string", "description": "SKU de la variante", "searchable": true, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "title", "sourceColumn": "title", "type": "string", "description": "Título de la variante", "searchable": true, "filterable": false, "visible": true, "sensitive": false },
+        { "name": "productTitle", "sourceColumn": "productTitle", "type": "string", "description": "Título del producto padre", "searchable": true, "filterable": false, "visible": true, "sensitive": false },
+        { "name": "price", "sourceColumn": "price", "type": "number", "description": "Precio de venta", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "inventoryQuantity", "sourceColumn": "inventoryQuantity", "type": "number", "description": "Cantidad en inventario", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "size", "sourceColumn": "size", "type": "string", "description": "Talla", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "color", "sourceColumn": "color", "type": "string", "description": "Color", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "collections", "sourceColumn": "collections", "type": "string", "description": "Colecciones del producto", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
+        { "name": "status", "sourceColumn": "status", "type": "string", "description": "Estado del producto en Shopify", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
         { "name": "cost", "sourceColumn": "unitCost", "type": "number", "searchable": false, "filterable": false, "visible": true, "sensitive": true }
       ],
       "rules": [
