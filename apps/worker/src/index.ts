@@ -1,4 +1,5 @@
 import PgBoss from 'pg-boss';
+import { ALL_JOB_QUEUES } from '@data-gateway/core';
 import { loadWorkerEnv } from './env.js';
 import { registerJobs, scheduleJobs } from './jobs/index.js';
 
@@ -17,6 +18,9 @@ async function start(): Promise<void> {
   });
 
   await boss.start();
+  for (const queue of ALL_JOB_QUEUES) {
+    await boss.createQueue(queue);
+  }
   registerJobs(boss, env);
   await scheduleJobs(boss);
   console.log('Worker started (pg-boss schema: pgboss)');

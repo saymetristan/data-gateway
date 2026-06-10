@@ -17,6 +17,7 @@ serve(
   {
     fetch: app.fetch,
     port: env.PORT,
+    hostname: '0.0.0.0',
   },
   (info) => {
     console.log(`API listening on http://localhost:${String(info.port)}`);

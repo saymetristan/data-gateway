@@ -5,6 +5,19 @@ export const EMBEDDINGS_GENERATE_JOB = 'embeddings.generate';
 export const EVALS_RUN_JOB = 'evals.run';
 export const SHOPIFY_WEBHOOK_JOB = 'shopify.webhook';
 export const SHOPIFY_SYNC_SCHEDULED_JOB = 'shopify.sync.scheduled';
+export const HEALTH_HEARTBEAT_JOB = 'health.heartbeat';
+
+/** Colas que deben existir antes de work/schedule/send (pg-boss v10). */
+export const ALL_JOB_QUEUES = [
+  SOURCE_SYNC_JOB,
+  SOURCE_PROFILE_JOB,
+  SOURCE_INDEX_JOB,
+  EMBEDDINGS_GENERATE_JOB,
+  EVALS_RUN_JOB,
+  SHOPIFY_WEBHOOK_JOB,
+  SHOPIFY_SYNC_SCHEDULED_JOB,
+  HEALTH_HEARTBEAT_JOB,
+] as const;
 
 export type SourceSyncJobData = {
   sourceId: string;

@@ -34,6 +34,13 @@ flowchart TB
 
 Madurez de fuente: `connected → profiled → mapped → indexed → validated → agent_ready` (evals + activación explícita).
 
+## Producción
+
+- API: `https://api-production-4d24.up.railway.app` (dominio objetivo: `data.whaapy.com`, requiere CNAME `data` → `txsivm0h.up.railway.app`)
+- Railway proyecto `data-gateway`: servicios `api` (build `pnpm --filter @data-gateway/core build && pnpm --filter @data-gateway/api build`, start `node apps/api/dist/index.js`, healthcheck `/health`) y `worker` (ídem con `@data-gateway/worker`, sin dominio)
+- DB: Supabase `data-ingest` vía session pooler (`aws-1-us-east-1.pooler.supabase.com:5432`; pg-boss requiere session mode)
+- Deploy manual: `railway up --service api|worker` desde la raíz; migraciones SIEMPRE vía MCP `data-gateway-supabase` (nunca `db:migrate` contra prod)
+
 ## Local development
 
 ```bash
