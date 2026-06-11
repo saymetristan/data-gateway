@@ -38,7 +38,9 @@ Madurez de fuente: `connected → profiled → mapped → indexed → validated 
 
 - API: `https://data.whaapy.com` (Railway fallback: `https://api-production-4d24.up.railway.app`)
 - MCP Whaapy-compatible: `https://mcp.data.whaapy.com/mcp` (Railway fallback: `https://mcp-production-91e6.up.railway.app/mcp`)
-- Railway proyecto `data-gateway`: servicios `api` (build `pnpm --filter @data-gateway/core build && pnpm --filter @data-gateway/api build`, start `node apps/api/dist/index.js`, healthcheck `/health`), `worker` (ídem con `@data-gateway/worker`, sin dominio) y `mcp` (build `pnpm --filter @data-gateway/core build && pnpm --filter @data-gateway/mcp-server build`, start `node packages/mcp-server/dist/http.js`)
+- Railway proyecto `data-gateway`: servicios `api` (healthcheck `/health`), `worker` (sin dominio) y `mcp` (healthcheck `/health`, build con `@whaapy/data-gateway-mcp`)
+- Monitoreo mínimo: UptimeRobot (o similar) sobre `https://data.whaapy.com/health` y `https://mcp.data.whaapy.com/health` cada 5 min
+- Onboarding clientes: ver [docs/CLIENT_ONBOARDING.md](docs/CLIENT_ONBOARDING.md) y `scripts/onboard-client.sh`
 - DB: Supabase `data-ingest` vía session pooler (`aws-1-us-east-1.pooler.supabase.com:5432`; pg-boss requiere session mode)
 - Deploy manual: `railway up --service api|worker` desde la raíz; migraciones SIEMPRE vía MCP `data-gateway-supabase` (nunca `db:migrate` contra prod)
 
@@ -50,7 +52,7 @@ En Whaapy, agrega un MCP con:
 - Auth: bearer token = API key de workspace (`tools:read` + `tools:invoke`)
 - Protocolo: Streamable HTTP (`MCP-Protocol-Version: 2025-06-18`)
 
-El server traduce `tools/list` a `GET /tools` y `tools/call` a `POST /tools/:name/invoke`. Los clientes que necesiten combinar tools propias pueden extender `packages/mcp-server`; ver `packages/mcp-server/README.md`.
+El server traduce `tools/list` a `GET /tools` y `tools/call` a `POST /tools/:name/invoke`. Paquete npm: `@whaapy/data-gateway-mcp`. Los clientes que necesiten combinar tools propias pueden extender el paquete; ver `packages/mcp-server/README.md`.
 
 ## Local development
 

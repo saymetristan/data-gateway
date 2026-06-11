@@ -98,6 +98,9 @@ export function createGatewayMcpHttpApp(env: McpServerEnv) {
   }
 
   const app = createMcpExpressApp({ host: '0.0.0.0' });
+  app.get('/health', (_req: Request, res: Response) => {
+    res.status(200).json({ ok: true, service: 'data-gateway-mcp' });
+  });
   app.post('/mcp', async (req: Request, res: Response) => {
     const session = await resolveSession(req, res);
     if (!session) return;

@@ -34,6 +34,14 @@ const manifest: ToolManifest = {
 };
 
 describe('MCP HTTP compatibility', () => {
+  it('exposes /health without auth', async () => {
+    const app = createGatewayMcpHttpApp({
+      GATEWAY_URL: 'http://127.0.0.1:3999',
+      MCP_PORT: 3100,
+    });
+    const response = await request(app).get('/health').expect(200);
+    expect(response.body).toEqual({ ok: true, service: 'data-gateway-mcp' });
+  });
   let gatewayServer: ReturnType<import('node:http').Server['listen']>;
   let gatewayUrl: string;
 

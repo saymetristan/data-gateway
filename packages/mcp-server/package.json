@@ -1,11 +1,32 @@
 {
-  "name": "@data-gateway/mcp-server",
-  "version": "0.0.1",
-  "private": true,
+  "name": "@whaapy/data-gateway-mcp",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Reference MCP server for Data Gateway tools manifest",
+  "description": "Streamable HTTP MCP server for Data Gateway tools (Whaapy-compatible)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saymetristan/data-gateway.git",
+    "directory": "packages/mcp-server"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "data-gateway",
+    "whaapy",
+    "ai-tools",
+    "streamable-http"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
-    "data-gateway-mcp": "./dist/stdio.js"
+    "data-gateway-mcp": "dist/stdio.js"
   },
   "main": "./dist/server.js",
   "types": "./dist/server.d.ts",
@@ -15,13 +36,17 @@
       "default": "./dist/server.js"
     }
   },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "start:stdio": "node dist/stdio.js",
-    "start:http": "node dist/http.js"
+    "start:http": "node dist/http.js",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

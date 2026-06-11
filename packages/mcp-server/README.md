@@ -1,4 +1,4 @@
-# @data-gateway/mcp-server
+# @whaapy/data-gateway-mcp
 
 Servidor MCP de referencia para el Data Gateway. Consume el manifest REST (`GET /tools`) y ejecuta tools vía `POST /tools/:name/invoke`.
 
@@ -42,7 +42,7 @@ Ejemplo de configuración MCP:
 ## Streamable HTTP
 
 ```bash
-GATEWAY_URL=http://localhost:3000 GATEWAY_API_KEY=dgw_... pnpm --filter @data-gateway/mcp-server start:http
+GATEWAY_URL=http://localhost:3000 GATEWAY_API_KEY=dgw_... pnpm --filter @whaapy/data-gateway-mcp start:http
 ```
 
 Endpoint MCP: `http://0.0.0.0:3100/mcp`.
@@ -92,8 +92,8 @@ Checklist de compatibilidad Whaapy:
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { GatewayClient } from '@data-gateway/mcp-server/dist/client.js';
-import { createGatewayMcpServer } from '@data-gateway/mcp-server/dist/server.js';
+import { GatewayClient } from '@whaapy/data-gateway-mcp/dist/client.js';
+import { createGatewayMcpServer } from '@whaapy/data-gateway-mcp/dist/server.js';
 
 const client = new GatewayClient({
   gatewayUrl: process.env.GATEWAY_URL!,

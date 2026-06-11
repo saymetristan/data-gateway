@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { GatewayClient } from './client.js';
 import { loadMcpEnv } from './env.js';
