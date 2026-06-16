@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+const profileValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
 export const profileColumnSchema = z.object({
   name: z.string(),
   inferredType: z.enum(['string', 'number', 'boolean', 'date', 'datetime', 'json', 'unknown']),
@@ -8,16 +10,46 @@ export const profileColumnSchema = z.object({
   nullRate: z.number().min(0).max(1),
   topValues: z.array(
     z.object({
-      value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+      value: profileValueSchema,
       count: z.number().int().nonnegative(),
     }),
   ),
+  suggestedValues: z.array(
+    z.object({
+      value: profileValueSchema,
+      count: z.number().int().nonnegative(),
+    }),
+  ).optional(),
+  enumCandidate: z.boolean().optional(),
+  jsonShape: z.record(
+    z.string(),
+    z.object({
+      inferredType: z.enum(['string', 'number', 'boolean', 'date', 'datetime', 'json', 'unknown']),
+      cardinality: z.number().int().nonnegative(),
+      topValues: z.array(
+        z.object({
+          value: profileValueSchema,
+          count: z.number().int().nonnegative(),
+        }),
+      ),
+    }),
+  ).optional(),
   min: z.union([z.string(), z.number()]).optional(),
   max: z.union([z.string(), z.number()]).optional(),
 });
 
+export const profileForeignKeySchema = z.object({
+  column: z.string(),
+  referencedTable: z.string(),
+  referencedColumn: z.string(),
+});
+
 export const profileTableSchema = z.object({
   table: z.string(),
+  schema: z.string().optional(),
+  tableRole: z.enum(['entity', 'lookup', 'junction', 'config']).optional(),
+  primaryKey: z.array(z.string()).optional(),
+  foreignKeys: z.array(profileForeignKeySchema).optional(),
   recordCount: z.number().int().nonnegative(),
   columns: z.array(profileColumnSchema),
 });

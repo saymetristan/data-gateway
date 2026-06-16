@@ -52,6 +52,44 @@ async function ensureFixtureSeeded(): Promise<void> {
   }
 }
 
+async function ensureRelationFixtureSeeded(): Promise<void> {
+  const adminUrl = FIXTURE_URL.replace('readonly_user:readonly_pass', 'postgres:postgres');
+  const pool = new pg.Pool({ connectionString: adminUrl });
+  try {
+    await pool.query(`
+      DROP TABLE IF EXISTS product_accessories;
+      DROP TABLE IF EXISTS accessories;
+
+      CREATE TABLE accessories (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL
+      );
+
+      CREATE TABLE product_accessories (
+        product_id INTEGER NOT NULL REFERENCES products(id),
+        accessory_id TEXT NOT NULL REFERENCES accessories(id),
+        recommended BOOLEAN NOT NULL DEFAULT true,
+        PRIMARY KEY (product_id, accessory_id)
+      );
+
+      INSERT INTO accessories (id, name, description)
+      VALUES
+        ('gift-wrap', 'Envoltura premium', 'Empaque de regalo'),
+        ('warranty', 'Garantia extendida', 'Cobertura adicional')
+      ON CONFLICT (id) DO NOTHING;
+
+      INSERT INTO product_accessories (product_id, accessory_id, recommended)
+      VALUES (1, 'gift-wrap', true), (1, 'warranty', true)
+      ON CONFLICT DO NOTHING;
+
+      GRANT SELECT ON accessories, product_accessories TO readonly_user;
+    `);
+  } finally {
+    await pool.end();
+  }
+}
+
 const productMapping: MappingDocument = {
   entities: [
     {
@@ -351,6 +389,88 @@ describe.runIf(hasFixture)('phase 2 integration', () => {
         .from(sourceRecordsRaw)
         .where(eq(sourceRecordsRaw.sourceId, source.id));
       expect(rawRows).toHaveLength(300);
+    });
+  });
+
+  it('materializes configured relation aggregates into product records', async () => {
+    await ensureRelationFixtureSeeded();
+
+    await withTestDatabase(async (db, testUrl) => {
+      const slug = `relations-${crypto.randomUUID().slice(0, 8)}`;
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Relations', slug, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace not created');
+
+      const encryptedConfig = encryptSourceConfig(
+        'database_url',
+        { connectionUrl: FIXTURE_URL, tables: ['products', 'accessories', 'product_accessories'] },
+        ENCRYPTION_KEY,
+      );
+      const [source] = await db
+        .insert(sources)
+        .values({
+          workspaceId: workspace.id,
+          type: 'database_url',
+          name: 'Fixture Relations',
+          config: encryptedConfig,
+          maturityStatus: 'connected',
+        })
+        .returning();
+      if (!source) throw new Error('source not created');
+
+      const syncResult = await syncDatabaseSource(
+        db,
+        source.id,
+        workspace.id,
+        ENCRYPTION_KEY,
+        testUrl,
+        { fullSync: true },
+      );
+      expect(syncResult.synced).toBeGreaterThanOrEqual(303);
+      const profile = await profileSource(db, source.id);
+      expect(profile.tables.find((table) => table.table === 'product_accessories')?.tableRole)
+        .toBe('junction');
+
+      await createSourceMapping(db, source.id, workspace.id, {
+        document: {
+          entities: [
+            {
+              ...productMapping.entities[0]!,
+              relationAggregates: [
+                {
+                  field: 'accessories',
+                  label: 'Accesorios recomendados',
+                  description: 'Accesorios recomendados para el producto',
+                  viaTable: 'product_accessories',
+                  sourceColumn: 'id',
+                  viaSourceColumn: 'product_id',
+                  viaTargetColumn: 'accessory_id',
+                  targetTable: 'accessories',
+                  targetColumn: 'id',
+                  targetLabelColumn: 'name',
+                  searchable: true,
+                  visible: true,
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      await indexSource(db, source.id, workspace.id, testUrl, new MockLlmProvider());
+
+      const indexedRecords = await db.select().from(records).where(eq(records.sourceId, source.id));
+      const firstProduct = indexedRecords.find((row) => {
+        const data = row.data as Record<string, unknown>;
+        return data.sku === 'SKU-00001';
+      });
+
+      expect(firstProduct?.searchSource).toContain('Envoltura premium');
+      expect(firstProduct?.data).toMatchObject({
+        accessories: ['Envoltura premium', 'Garantia extendida'],
+      });
     });
   });
 });

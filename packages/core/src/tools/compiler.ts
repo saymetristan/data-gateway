@@ -1,9 +1,17 @@
 import type { MappingEntity, MappingField } from '../schemas/mapping.js';
 import type { ProfileColumn, SourceProfileDocument } from '../schemas/profile.js';
 import type { ToolDefinition, ToolKind } from '../schemas/tools.js';
+import {
+  describeTarget,
+  entityLabel,
+  fieldLabel,
+  getFilterableTargets,
+  pickIdentifierField,
+  profileColumnsForEntity,
+} from '../mapping/metadata.js';
 
 const JSON_SCHEMA_DRAFT = 'https://json-schema.org/draft/2020-12/schema';
-const ENUM_MAX_CARDINALITY = 20;
+const ENUM_MAX_CARDINALITY = 50;
 const ENUM_MAX_TOP_VALUES = 20;
 
 export type CompileToolsInput = {
@@ -12,17 +20,14 @@ export type CompileToolsInput = {
   mappingVersion: number;
   sourceIds: string[];
   workspaceName?: string;
-};
-
-type FilterableTarget = {
-  name: string;
-  type: MappingField['type'];
-  sourceColumn?: string | undefined;
-  description?: string | undefined;
-  fromRule?: boolean | undefined;
+  sourceName?: string;
 };
 
 export function compileToolsForEntity(input: CompileToolsInput): ToolDefinition[] {
+  if (input.entity.sourceKind === 'junction' && input.entity.exposeAsTool !== true) {
+    return [];
+  }
+
   const tools: ToolDefinition[] = [];
   const searchTool = buildSearchTool(input);
   if (searchTool) tools.push(searchTool);
@@ -48,6 +53,7 @@ export function mergeToolDefinitions(tools: ToolDefinition[]): ToolDefinition[] 
       ...existing,
       sourceIds,
       mappingVersion: Math.max(existing.mappingVersion, tool.mappingVersion),
+      description: mergeDescriptions(existing.description, tool.description),
       inputSchema: mergeInputSchemas(existing.inputSchema, tool.inputSchema),
     });
   }
@@ -88,7 +94,12 @@ function mergeJsonSchemaProperty(
     if (values.length > 0 && values.length <= ENUM_MAX_TOP_VALUES) {
       merged.enum = [...new Set(values)];
     } else {
-      delete merged.enum;
+      const unique = [...new Set(values)];
+      merged.enum = unique.slice(0, ENUM_MAX_TOP_VALUES);
+      merged.description = appendDescription(
+        merged.description,
+        `Valores disponibles truncados a ${String(ENUM_MAX_TOP_VALUES)} de ${String(unique.length)} detectados.`,
+      );
     }
   }
 
@@ -106,6 +117,16 @@ function mergeJsonSchemaProperty(
   }
 
   return merged;
+}
+
+function mergeDescriptions(left: string, right: string): string {
+  if (left === right || left.includes(right)) return left;
+  return `${left}\nTambién aplica a: ${right.split('\n')[0] ?? right}`;
+}
+
+function appendDescription(value: unknown, addition: string): string {
+  const base = typeof value === 'string' ? value.trim() : '';
+  return base ? `${base} ${addition}` : addition;
 }
 
 function enumValues(value: unknown): string[] {
@@ -157,11 +178,13 @@ function buildSearchTool(input: CompileToolsInput): ToolDefinition | null {
       const maxKey = `${target.name}_max`;
       const minSchema: Record<string, unknown> = {
         type: target.type === 'date' ? 'string' : 'number',
-        description: target.description ?? `Mínimo para ${target.name}`,
+        title: `${target.filterLabel} mínimo`,
+        description: describeRangeTarget(target, 'mínimo'),
       };
       const maxSchema: Record<string, unknown> = {
         type: target.type === 'date' ? 'string' : 'number',
-        description: target.description ?? `Máximo para ${target.name}`,
+        title: `${target.filterLabel} máximo`,
+        description: describeRangeTarget(target, 'máximo'),
       };
       if (column?.min !== undefined) minSchema.minimum = column.min;
       if (column?.max !== undefined) maxSchema.maximum = column.max;
@@ -173,7 +196,8 @@ function buildSearchTool(input: CompileToolsInput): ToolDefinition | null {
     if (target.type === 'boolean') {
       properties[target.name] = {
         type: 'boolean',
-        description: target.description ?? `Filtrar por ${target.name}`,
+        title: target.filterLabel,
+        description: describeTarget(target),
       };
       continue;
     }
@@ -183,16 +207,18 @@ function buildSearchTool(input: CompileToolsInput): ToolDefinition | null {
       ? {
           type: 'string',
           enum: enumValues,
-          description: target.description ?? `Filtrar por ${target.name}`,
+          title: target.filterLabel,
+          description: describeEnumTarget(target, column, enumValues),
         }
       : {
           type: 'string',
-          description: target.description ?? `Filtrar por ${target.name}`,
+          title: target.filterLabel,
+          description: describeEnumTarget(target, column, []),
         };
   }
 
   const entitySlug = slugifyToolName(input.entity.entity);
-  const filterNames = targets.map((target) => target.name);
+  const filterNames = targets.map((target) => target.filterLabel);
   return {
     name: `search_${entitySlug}`,
     kind: 'search',
@@ -224,14 +250,15 @@ function buildCheckAvailabilityTool(input: CompileToolsInput): ToolDefinition | 
   const properties: Record<string, unknown> = {
     [identifier.name]: {
       type: 'string',
-      description: identifier.description ?? `Identificador (${identifier.name})`,
+      title: fieldLabel(identifier),
+      description: identifier.description ?? `Identificador (${fieldLabel(identifier)})`,
     },
   };
 
   return {
     name: `check_availability_${entitySlug}`,
     kind: 'check_availability',
-    description: buildAvailabilityDescription(input, identifier.name),
+    description: buildAvailabilityDescription(input, identifier),
     entity: input.entity.entity,
     sourceIds: [...input.sourceIds],
     mappingVersion: input.mappingVersion,
@@ -250,89 +277,38 @@ function buildCheckAvailabilityTool(input: CompileToolsInput): ToolDefinition | 
 }
 
 function buildSearchDescription(input: CompileToolsInput, filterNames: string[]): string {
-  const entityLabel = input.entity.description ?? input.entity.entity;
-  const workspaceSuffix = input.workspaceName ? ` en ${input.workspaceName}` : '';
+  const label = entityLabel(input.entity);
+  const context = [input.workspaceName, input.sourceName].filter(Boolean).join(' / ');
+  const workspaceSuffix = context ? ` en ${context}` : '';
   const filters = filterNames.length > 0 ? filterNames.join(', ') : 'los filtros disponibles';
   return [
-    `Busca ${entityLabel}${workspaceSuffix} usando texto libre y filtros estructurados (${filters}).`,
-    `When to use: cuando el cliente quiere encontrar, comparar o filtrar ${input.entity.entity} por características, identificadores, disponibilidad o precio.`,
+    `Busca ${label}${workspaceSuffix} usando texto libre y filtros estructurados (${filters}).`,
+    `When to use: cuando el cliente quiere encontrar, comparar o filtrar ${label} por características, identificadores, disponibilidad o precio.`,
     'Never use for: modificar datos, confirmar compras, reservar, cobrar, cancelar pedidos o prometer disponibilidad sin resultados de la herramienta.',
     'Success criteria: ok=true, status=success y data.results contiene resultados relevantes; usa los campos devueltos como fuente de verdad.',
     'Fallback: si status=needs_more_info o no hay resultados, pide más detalle al cliente en vez de inventar datos.',
   ].join('\n');
 }
 
-function buildAvailabilityDescription(input: CompileToolsInput, identifierName: string): string {
-  const entityLabel = input.entity.description ?? input.entity.entity;
-  const workspaceSuffix = input.workspaceName ? ` en ${input.workspaceName}` : '';
+function buildAvailabilityDescription(input: CompileToolsInput, identifier: MappingField): string {
+  const label = entityLabel(input.entity);
+  const identifierName = fieldLabel(identifier);
+  const context = [input.workspaceName, input.sourceName].filter(Boolean).join(' / ');
+  const workspaceSuffix = context ? ` en ${context}` : '';
   return [
-    `Verifica disponibilidad de ${entityLabel}${workspaceSuffix} por ${identifierName}.`,
-    `When to use: cuando el cliente pregunta si un ${input.entity.entity} específico está disponible o en stock y ya hay un identificador como ${identifierName}.`,
+    `Verifica disponibilidad de ${label}${workspaceSuffix} por ${identifierName}.`,
+    `When to use: cuando el cliente pregunta si un ${label} específico está disponible o en stock y ya hay un identificador como ${identifierName}.`,
     `Never use for: búsquedas amplias sin identificador; en ese caso usa search_${slugifyToolName(input.entity.entity)} primero.`,
     'Success criteria: ok=true, status=success y data contiene el estado de disponibilidad del registro consultado.',
     'Fallback: si falta identificador o no hay coincidencia, pide SKU, nombre exacto u otro dato verificable.',
   ].join('\n');
 }
 
-function getFilterableTargets(entity: MappingEntity): FilterableTarget[] {
-  const targets: FilterableTarget[] = [];
-  const seen = new Set<string>();
-
-  for (const field of entity.fields) {
-    if (!field.filterable || field.sensitive) continue;
-    targets.push({
-      name: field.name,
-      type: field.type,
-      sourceColumn: field.sourceColumn,
-      ...(field.description ? { description: field.description } : {}),
-    });
-    seen.add(field.name);
-  }
-
-  for (const rule of entity.rules) {
-    if (seen.has(rule.field)) continue;
-    targets.push({
-      name: rule.field,
-      type: 'boolean',
-      fromRule: true,
-      description: `Campo derivado ${rule.field}`,
-    });
-    seen.add(rule.field);
-  }
-
-  for (const filter of entity.defaultFilters) {
-    if (seen.has(filter.field)) continue;
-    const inferredType =
-      typeof filter.value === 'boolean'
-        ? 'boolean'
-        : typeof filter.value === 'number'
-          ? 'number'
-          : 'string';
-    targets.push({
-      name: filter.field,
-      type: inferredType,
-      fromRule: true,
-      description: `Campo con filtro por defecto ${filter.field}`,
-    });
-    seen.add(filter.field);
-  }
-
-  return targets;
-}
-
-function pickIdentifierField(entity: MappingEntity): MappingField | null {
-  const candidates = entity.fields.filter(
-    (field) => field.filterable && !field.sensitive && field.type === 'string',
-  );
-  const sku = candidates.find((field) => field.name.toLowerCase() === 'sku');
-  if (sku) return sku;
-  return candidates[0] ?? null;
-}
-
 function buildEnumValues(column: ProfileColumn | undefined): string[] | null {
   if (!column) return null;
+  if (column.inferredType === 'json') return null;
   if (column.cardinality > ENUM_MAX_CARDINALITY) return null;
-  const values = column.topValues
+  const values = (column.suggestedValues ?? column.topValues)
     .slice(0, ENUM_MAX_TOP_VALUES)
     .map((item) => item.value)
     .filter((value) => value !== null)
@@ -341,17 +317,36 @@ function buildEnumValues(column: ProfileColumn | undefined): string[] | null {
   return [...new Set(values)];
 }
 
-function profileColumnsForEntity(
-  entity: MappingEntity,
-  profile: SourceProfileDocument,
-): Map<string, ProfileColumn> {
-  const table = profile.tables.find((item) => item.table === entity.sourceTable);
-  const map = new Map<string, ProfileColumn>();
-  if (!table) return map;
-  for (const column of table.columns) {
-    map.set(column.name, column);
+function describeRangeTarget(
+  target: ReturnType<typeof getFilterableTargets>[number],
+  bound: 'mínimo' | 'máximo',
+): string {
+  const base = target.description ?? `Filtrar por ${target.filterLabel}`;
+  const unit = target.unit ? ` Unidad: ${target.unit}.` : '';
+  return `${base} Usa este parámetro para el valor ${bound}.${unit}`;
+}
+
+function describeEnumTarget(
+  target: ReturnType<typeof getFilterableTargets>[number],
+  column: ProfileColumn | undefined,
+  enumValues: string[],
+): string {
+  const parts = [describeTarget(target)];
+  const suggested = (column?.suggestedValues ?? column?.topValues ?? [])
+    .map((item) => item.value)
+    .filter((value) => value !== null)
+    .map((value) => String(value));
+  if (enumValues.length > 0) {
+    parts.push(`Valores permitidos: ${enumValues.join(', ')}.`);
+  } else if (suggested.length > 0) {
+    parts.push(`Valores frecuentes: ${suggested.slice(0, ENUM_MAX_TOP_VALUES).join(', ')}.`);
   }
-  return map;
+  if (column && column.cardinality > ENUM_MAX_CARDINALITY) {
+    parts.push(
+      `Alta cardinalidad (${String(column.cardinality)} valores); acepta texto exacto si no aparece en sugerencias.`,
+    );
+  }
+  return parts.join(' ');
 }
 
 export function toolKindFromName(name: string): ToolKind | null {

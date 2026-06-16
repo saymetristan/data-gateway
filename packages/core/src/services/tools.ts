@@ -15,7 +15,7 @@ import { executeQuery } from './query.js';
 
 export async function getToolManifest(db: Database, workspaceId: string): Promise<ToolManifest> {
   const [workspace] = await db
-    .select({ id: workspaces.id })
+    .select({ id: workspaces.id, name: workspaces.name })
     .from(workspaces)
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
@@ -29,6 +29,7 @@ export async function getToolManifest(db: Database, workspaceId: string): Promis
     .where(and(eq(sources.workspaceId, workspaceId), eq(sources.maturityStatus, 'agent_ready')));
 
   const compiled: ToolDefinition[] = [];
+  const warnings: string[] = [];
   for (const source of rows) {
     try {
       const mapping = await getActiveMapping(db, source.id);
@@ -42,17 +43,21 @@ export async function getToolManifest(db: Database, workspaceId: string): Promis
             profile,
             mappingVersion: mapping.version,
             sourceIds: [source.id],
+            workspaceName: workspace.name,
+            sourceName: source.name,
           }),
         );
       }
-    } catch {
-      continue;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      warnings.push(`Source "${source.name}" skipped while compiling tools: ${message}`);
     }
   }
 
   return {
     workspaceId,
     generatedAt: new Date().toISOString(),
+    warnings,
     tools: mergeToolDefinitions(compiled),
   };
 }

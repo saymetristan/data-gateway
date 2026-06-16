@@ -7,7 +7,7 @@ const baseEntity: MappingEntity = {
   entity: 'product',
   sourceTable: 'products',
   fields: [
-    { name: 'price', sourceColumn: 'price', type: 'number', filterable: true, searchable: false, visible: true, sensitive: false },
+    { name: 'price', sourceColumn: 'price', type: 'number', label: 'Precio', aliases: ['costo'], filterable: true, searchable: false, visible: true, sensitive: false },
     { name: 'stock', sourceColumn: 'stock', type: 'number', filterable: true, searchable: false, visible: true, sensitive: false },
     { name: 'color', sourceColumn: 'color', type: 'string', filterable: true, searchable: false, visible: true, sensitive: false },
     { name: 'size', sourceColumn: 'size', type: 'string', filterable: true, searchable: false, visible: true, sensitive: false },
@@ -162,5 +162,52 @@ describe('extractFilters', () => {
   it('extrae por debajo de', () => {
     const result = run('por debajo de 75');
     expect(result.filters).toContainEqual({ field: 'price', op: 'lt', value: 75 });
+  });
+
+  it('usa aliases/descripciones para resolver rangos numéricos', () => {
+    const aliasEntity: MappingEntity = {
+      ...baseEntity,
+      fields: [
+        ...baseEntity.fields.filter((field) => field.type !== 'number'),
+        {
+          name: 'amount',
+          sourceColumn: 'price',
+          type: 'number',
+          label: 'Importe',
+          aliases: ['precio', 'costo'],
+          filterable: true,
+          searchable: false,
+          visible: true,
+          sensitive: false,
+        },
+      ],
+    };
+    const result = extractFilters({ query: 'menos de 100 pesos', entity: aliasEntity, profile });
+    expect(result.filters).toContainEqual({ field: 'amount', op: 'lt', value: 100 });
+  });
+
+  it('extrae boolean desde rule derivada con aliases', () => {
+    const derivedEntity: MappingEntity = {
+      ...baseEntity,
+      fields: baseEntity.fields.filter((field) => field.name !== 'available'),
+      rules: [
+        {
+          field: 'active_for_sale',
+          label: 'Disponible',
+          description: 'Producto disponible para venta',
+          aliases: ['disponible', 'en stock'],
+          conditions: [{ column: 'stock', op: 'gt', value: 0 }],
+        },
+      ],
+      defaultFilters: [{ field: 'active_for_sale', op: 'eq', value: true }],
+    };
+
+    const result = extractFilters({
+      query: 'tinaco disponible',
+      entity: derivedEntity,
+      profile,
+    });
+
+    expect(result.filters).toContainEqual({ field: 'active_for_sale', op: 'eq', value: true });
   });
 });

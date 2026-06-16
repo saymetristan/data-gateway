@@ -55,5 +55,12 @@ function propertyToZod(property: Record<string, unknown>, required: boolean): z.
     schema = schema.default(property.default as never);
   }
 
+  const description = [property.title, property.description]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .join(': ');
+  if (description) {
+    schema = schema.describe(description);
+  }
+
   return schema;
 }

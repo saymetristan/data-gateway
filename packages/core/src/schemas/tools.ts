@@ -18,6 +18,7 @@ export const toolDefinitionSchema = z.object({
 export const toolManifestSchema = z.object({
   workspaceId: z.string().uuid(),
   generatedAt: z.string(),
+  warnings: z.array(z.string()).default([]),
   tools: z.array(toolDefinitionSchema),
 });
 

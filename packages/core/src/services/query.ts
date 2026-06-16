@@ -4,7 +4,7 @@ import { queryLogs, recordEmbeddings, records, sources } from '../db/schema/inde
 import { GatewayError } from '../errors/gateway-error.js';
 import type { EmbeddingProvider } from '../providers/embeddings.js';
 import type { LlmProvider } from '../providers/llm.js';
-import type { MappingDocument, MappingEntity } from '../schemas/mapping.js';
+import type { MappingDocument, MappingEntity, MappingField } from '../schemas/mapping.js';
 import type { SourceProfileDocument } from '../schemas/profile.js';
 import type {
   NormalizedFilter,
@@ -16,11 +16,8 @@ import { computeConfidence } from '../query/confidence.js';
 import { extractFilters } from '../query/extract-filters.js';
 import { extractFiltersWithLlm } from '../query/llm-fallback.js';
 import { hybridSearch } from '../query/retrieval.js';
-import {
-  filterableFieldNames,
-  shapeAppliedFilters,
-  shapeRecordData,
-} from '../query/shaping.js';
+import { shapeAppliedFilters, shapeRecordData } from '../query/shaping.js';
+import { getFilterableTargets } from '../mapping/metadata.js';
 import { getActiveMapping } from './mappings.js';
 import { getSourceProfile } from './profile.js';
 
@@ -348,8 +345,8 @@ function collectFilterableFields(
   const names = new Set<string>();
   for (const source of queryable) {
     for (const entityDef of pickEntities(source.document, entity)) {
-      for (const name of filterableFieldNames(entityDef.fields)) {
-        names.add(name);
+      for (const target of getFilterableTargets(entityDef)) {
+        names.add(target.name);
       }
     }
   }
@@ -360,23 +357,40 @@ function collectAllFields(
   queryable: QueryableSource[],
   entity?: string,
 ) {
-  const fields = [];
+  const fields: MappingField[] = [];
   for (const source of queryable) {
     for (const entityDef of pickEntities(source.document, entity)) {
       fields.push(...entityDef.fields);
+      fields.push(...relationAggregateFields(entityDef));
     }
   }
   return fields;
 }
 
-function buildFieldMap(queryable: QueryableSource[]): Map<string, MappingEntity['fields']> {
-  const map = new Map<string, MappingEntity['fields']>();
+function buildFieldMap(queryable: QueryableSource[]): Map<string, MappingField[]> {
+  const map = new Map<string, MappingField[]>();
   for (const source of queryable) {
     for (const entityDef of source.document.entities) {
-      map.set(entityDef.entity, entityDef.fields);
+      map.set(entityDef.entity, [...entityDef.fields, ...relationAggregateFields(entityDef)]);
     }
   }
   return map;
+}
+
+function relationAggregateFields(entity: MappingEntity): MappingField[] {
+  return (entity.relationAggregates ?? []).map((aggregate) => ({
+    name: aggregate.field,
+    sourceColumn: aggregate.field,
+    type: 'json' as const,
+    ...(aggregate.description ? { description: aggregate.description } : {}),
+    ...(aggregate.label ? { label: aggregate.label } : {}),
+    searchable: aggregate.searchable,
+    filterable: false,
+    visible: aggregate.visible,
+    sensitive: false,
+    aliases: [],
+    identifier: false,
+  }));
 }
 
 /**

@@ -59,6 +59,49 @@ export function validateMappingAgainstProfile(
         );
       }
     }
+
+    for (const aggregate of entity.relationAggregates ?? []) {
+      if (!columns.has(aggregate.sourceColumn)) {
+        throw GatewayError.unprocessable(
+          `Relation aggregate "${aggregate.field}" references unknown source column "${aggregate.sourceColumn}" in table "${entity.sourceTable}"`,
+        );
+      }
+      const viaTable = tables.get(aggregate.viaTable);
+      if (!viaTable) {
+        throw GatewayError.unprocessable(
+          `Relation aggregate "${aggregate.field}" references unknown via table "${aggregate.viaTable}"`,
+        );
+      }
+      const viaColumns = new Set(viaTable.columns.map((column) => column.name));
+      if (!viaColumns.has(aggregate.viaSourceColumn)) {
+        throw GatewayError.unprocessable(
+          `Relation aggregate "${aggregate.field}" references unknown via source column "${aggregate.viaSourceColumn}"`,
+        );
+      }
+      if (!viaColumns.has(aggregate.viaTargetColumn)) {
+        throw GatewayError.unprocessable(
+          `Relation aggregate "${aggregate.field}" references unknown via target column "${aggregate.viaTargetColumn}"`,
+        );
+      }
+      const targetTable = tables.get(aggregate.targetTable);
+      if (!targetTable) {
+        throw GatewayError.unprocessable(
+          `Relation aggregate "${aggregate.field}" references unknown target table "${aggregate.targetTable}"`,
+        );
+      }
+      const targetColumns = new Set(targetTable.columns.map((column) => column.name));
+      if (!targetColumns.has(aggregate.targetColumn)) {
+        throw GatewayError.unprocessable(
+          `Relation aggregate "${aggregate.field}" references unknown target column "${aggregate.targetColumn}"`,
+        );
+      }
+      if (aggregate.targetLabelColumn && !targetColumns.has(aggregate.targetLabelColumn)) {
+        throw GatewayError.unprocessable(
+          `Relation aggregate "${aggregate.field}" references unknown target label column "${aggregate.targetLabelColumn}"`,
+        );
+      }
+    }
+
     const sensitiveFieldNames = new Set(
       entity.fields.filter((field) => field.sensitive).map((field) => field.name),
     );
@@ -88,10 +131,7 @@ export function validateMappingAgainstProfile(
   }
 }
 
-function isCompatibleType(
-  mappingType: 'string' | 'number' | 'boolean' | 'date',
-  profileType: string,
-): boolean {
+function isCompatibleType(mappingType: string, profileType: string): boolean {
   if (mappingType === 'string') {
     return ['string', 'unknown', 'json', 'datetime'].includes(profileType);
   }
@@ -100,6 +140,9 @@ function isCompatibleType(
   }
   if (mappingType === 'boolean') {
     return ['boolean', 'string', 'number', 'unknown'].includes(profileType);
+  }
+  if (mappingType === 'json') {
+    return ['json', 'string', 'unknown'].includes(profileType);
   }
   return ['date', 'datetime', 'string', 'unknown'].includes(profileType);
 }

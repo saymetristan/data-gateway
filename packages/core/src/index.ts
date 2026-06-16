@@ -50,4 +50,5 @@ export * from './queue/boss.js';
 export * from './queue/jobs.js';
 export * from './mapping/apply.js';
 export * from './mapping/validate.js';
+export * from './mapping/metadata.js';
 export * from './utils/hash.js';

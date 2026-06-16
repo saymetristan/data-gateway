@@ -13,6 +13,10 @@ const variantEntity: MappingEntity = {
       sourceColumn: 'sku',
       type: 'string',
       description: 'SKU de la variante',
+      label: 'SKU',
+      filterLabel: 'SKU',
+      aliases: ['codigo', 'código'],
+      identifier: true,
       searchable: true,
       filterable: true,
       visible: true,
@@ -22,6 +26,11 @@ const variantEntity: MappingEntity = {
       name: 'price',
       sourceColumn: 'price',
       type: 'number',
+      label: 'Precio',
+      filterLabel: 'precio de venta',
+      unit: 'MXN',
+      aliases: [],
+      identifier: false,
       searchable: false,
       filterable: true,
       visible: true,
@@ -31,6 +40,10 @@ const variantEntity: MappingEntity = {
       name: 'color',
       sourceColumn: 'color',
       type: 'string',
+      label: 'Color',
+      filterLabel: 'color',
+      aliases: [],
+      identifier: false,
       searchable: false,
       filterable: true,
       visible: true,
@@ -40,6 +53,8 @@ const variantEntity: MappingEntity = {
       name: 'cost',
       sourceColumn: 'unitCost',
       type: 'number',
+      aliases: [],
+      identifier: false,
       searchable: false,
       filterable: false,
       visible: true,
@@ -49,6 +64,9 @@ const variantEntity: MappingEntity = {
   rules: [
     {
       field: 'available',
+      label: 'Disponible',
+      description: 'Producto activo con inventario',
+      aliases: ['disponible', 'en stock'],
       conditions: [
         { column: 'status', op: 'eq', value: 'active' },
         { column: 'inventoryQuantity', op: 'gt', value: 0 },
@@ -128,7 +146,10 @@ describe('tool compiler', () => {
     expect(properties.color?.enum).toEqual(['rojo', 'azul', 'negro']);
     expect(properties.price_min?.minimum).toBe(10);
     expect(properties.price_max?.maximum).toBe(500);
+    expect(properties.price_min?.description).toContain('MXN');
+    expect(properties.sku?.title).toBe('SKU');
     expect(properties.available?.type).toBe('boolean');
+    expect(properties.available?.description).toContain('Producto activo con inventario');
     expect(properties.cost).toBeUndefined();
   });
 
@@ -145,6 +166,8 @@ describe('tool compiler', () => {
     expect(availability?.description).toContain('When to use:');
     expect(availability?.description).toContain('Never use for:');
     expect(availability?.inputSchema.required).toEqual(['sku']);
+    const properties = availability?.inputSchema.properties as Record<string, Record<string, unknown>>;
+    expect(properties.sku?.title).toBe('SKU');
   });
 
   it('merges sourceIds and compatible schema metadata for duplicate tool names', () => {
@@ -193,6 +216,46 @@ describe('tool compiler', () => {
     expect(properties.color?.enum).toEqual(['rojo', 'azul', 'negro', 'verde']);
     expect(properties.price_min?.minimum).toBe(5);
     expect(properties.price_max?.maximum).toBe(750);
+  });
+
+  it('trunca enums fusionados en vez de borrarlos', () => {
+    const values = Array.from({ length: 25 }, (_, index) => ({
+      value: `color-${String(index)}`,
+      count: 1,
+    }));
+    const secondProfile: SourceProfileDocument = {
+      ...profile,
+      tables: [
+        {
+          ...profile.tables[0]!,
+          columns: profile.tables[0]!.columns.map((column) =>
+            column.name === 'color'
+              ? { ...column, cardinality: 25, suggestedValues: values, topValues: values.slice(0, 20) }
+              : column,
+          ),
+        },
+      ],
+    };
+
+    const merged = mergeToolDefinitions([
+      ...compileToolsForEntity({
+        entity: variantEntity,
+        profile: secondProfile,
+        mappingVersion: 1,
+        sourceIds: ['11111111-1111-4111-8111-111111111111'],
+      }),
+      ...compileToolsForEntity({
+        entity: variantEntity,
+        profile: secondProfile,
+        mappingVersion: 1,
+        sourceIds: ['22222222-2222-4222-8222-222222222222'],
+      }),
+    ]);
+
+    const search = merged.find((tool) => tool.name === 'search_variant');
+    const properties = search?.inputSchema.properties as Record<string, Record<string, unknown>>;
+    expect(properties.color?.enum).toHaveLength(20);
+    expect(properties.color?.description).toContain('Valores disponibles truncados');
   });
 
   it('slugifies entity names', () => {

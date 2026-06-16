@@ -3,6 +3,12 @@ import type { MappingEntity } from '../schemas/mapping.js';
 import type { ProfileColumn, SourceProfileDocument } from '../schemas/profile.js';
 import type { NormalizedFilter } from '../schemas/query.js';
 import type { LlmProvider } from '../providers/llm.js';
+import type { FilterableTarget } from '../mapping/metadata.js';
+import {
+  describeTarget,
+  getFilterableTargets,
+  profileColumnsForEntity,
+} from '../mapping/metadata.js';
 
 export type LlmFallbackInput = {
   unresolvedText: string;
@@ -21,7 +27,7 @@ export async function extractFiltersWithLlm(
   input: LlmFallbackInput,
 ): Promise<LlmFallbackResult> {
   const warnings: string[] = [];
-  const filterableFields = input.entity.fields.filter((field) => field.filterable && !field.sensitive);
+  const filterableFields = getFilterableTargets(input.entity);
   if (filterableFields.length === 0 || !input.unresolvedText.trim()) {
     return { filters: [], warnings };
   }
@@ -34,12 +40,15 @@ export async function extractFiltersWithLlm(
 
   const profileColumns = profileColumnsForEntity(input.entity, input.profile);
   const fieldDescriptions = unresolvedFields.map((field) => {
-    const column = profileColumns.get(field.sourceColumn) ?? profileColumns.get(field.name);
-    const enums = column?.topValues
+    const column = field.sourceColumn
+      ? profileColumns.get(field.sourceColumn)
+      : profileColumns.get(field.name);
+    const enums = (column?.suggestedValues ?? column?.topValues ?? [])
       .slice(0, 15)
       .map((item) => String(item.value))
       .join(', ');
-    return `- ${field.name} (${field.type})${enums ? `: valores comunes [${enums}]` : ''}`;
+    const aliases = field.aliases.length > 0 ? ` aliases: ${field.aliases.join(', ')}` : '';
+    return `- ${field.name} (${field.type}) ${describeTarget(field)}${aliases}${enums ? ` Valores comunes: [${enums}]` : ''}`;
   });
 
   const prompt = [
@@ -87,12 +96,14 @@ export async function extractFiltersWithLlm(
 }
 
 function buildFilterSchema(
-  fields: MappingEntity['fields'],
+  fields: FilterableTarget[],
   profileColumns: Map<string, ProfileColumn>,
 ) {
   const shape: Record<string, z.ZodTypeAny> = {};
   for (const field of fields) {
-    const column = profileColumns.get(field.sourceColumn) ?? profileColumns.get(field.name);
+    const column = field.sourceColumn
+      ? profileColumns.get(field.sourceColumn)
+      : profileColumns.get(field.name);
     switch (field.type) {
       case 'number':
         shape[field.name] = z.number().optional();
@@ -119,19 +130,6 @@ function buildFilterSchema(
   }
 
   return z.object(shape).partial();
-}
-
-function profileColumnsForEntity(
-  entity: MappingEntity,
-  profile: SourceProfileDocument,
-): Map<string, ProfileColumn> {
-  const table = profile.tables.find((item) => item.table === entity.sourceTable);
-  const map = new Map<string, ProfileColumn>();
-  if (!table) return map;
-  for (const column of table.columns) {
-    map.set(column.name, column);
-  }
-  return map;
 }
 
 function extractJson(text: string): string {

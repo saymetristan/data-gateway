@@ -7,6 +7,8 @@ import type { ProfileColumn, SourceProfileDocument } from '../schemas/profile.js
 import { toScalarString } from '../utils/scalar.js';
 
 const MAX_PROFILE_ROWS_PER_SOURCE = 10_000;
+const MAX_PROFILE_ROWS_PER_TABLE = 10_000;
+const MAX_SUGGESTED_VALUES = 50;
 
 export async function profileSource(
   db: Database,
@@ -30,7 +32,7 @@ export async function profileSource(
     .select()
     .from(sourceRecordsRaw)
     .where(eq(sourceRecordsRaw.sourceId, sourceId))
-    .limit(MAX_PROFILE_ROWS_PER_SOURCE);
+    .limit(MAX_PROFILE_ROWS_PER_SOURCE * 10);
 
   const tables = new Map<string, Record<string, unknown>[]>();
   for (const row of rawRows) {
@@ -43,15 +45,23 @@ export async function profileSource(
           : row.sourceRecordId.split(':')[0] ?? 'unknown';
 
     const existing = tables.get(tableName) ?? [];
+    if (existing.length >= MAX_PROFILE_ROWS_PER_TABLE) continue;
     existing.push(payload);
     tables.set(tableName, existing);
   }
 
-  const profileTables = [...tables.entries()].map(([table, rows]) => ({
-    table,
-    recordCount: rows.length,
-    columns: profileColumns(rows),
-  }));
+  const profileTables = [...tables.entries()].map(([table, rows]) => {
+    const meta = tableMetadata(rows);
+    return {
+      table,
+      recordCount: rows.length,
+      columns: profileColumns(rows),
+      ...(meta.schema ? { schema: meta.schema } : {}),
+      ...(meta.tableRole ? { tableRole: meta.tableRole } : {}),
+      ...(meta.primaryKey.length > 0 ? { primaryKey: meta.primaryKey } : {}),
+      ...(meta.foreignKeys.length > 0 ? { foreignKeys: meta.foreignKeys } : {}),
+    };
+  });
 
   const document: SourceProfileDocument = {
     tables: profileTables,
@@ -119,9 +129,9 @@ function profileColumn(name: string, rows: Record<string, unknown>[]): ProfileCo
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
 
-  const topValues = [...counts.entries()]
+  const suggestedValues = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 20)
+    .slice(0, MAX_SUGGESTED_VALUES)
     .map(([value, count]) => ({
       value: parseStoredValue(value),
       count,
@@ -132,6 +142,7 @@ function profileColumn(name: string, rows: Record<string, unknown>[]): ProfileCo
     .map((value) => Number(value))
     .filter((value) => !Number.isNaN(value));
 
+  const topValues = inferredType === 'json' ? [] : suggestedValues.slice(0, 20);
   const column: ProfileColumn = {
     name,
     inferredType,
@@ -139,7 +150,16 @@ function profileColumn(name: string, rows: Record<string, unknown>[]): ProfileCo
     nullCount,
     nullRate: rows.length === 0 ? 0 : nullCount / rows.length,
     topValues,
+    suggestedValues,
+    enumCandidate: inferredType !== 'json' && counts.size > 0 && counts.size <= MAX_SUGGESTED_VALUES,
   };
+
+  if (inferredType === 'json') {
+    const jsonShape = inferJsonShape(nonNull);
+    if (Object.keys(jsonShape).length > 0) {
+      column.jsonShape = jsonShape;
+    }
+  }
 
   if (inferredType === 'number' && numericValues.length > 0) {
     column.min = Math.min(...numericValues);
@@ -178,6 +198,97 @@ function inferType(values: unknown[]): ProfileColumn['inferredType'] {
   }
   if (types.has('string')) return 'string';
   return 'unknown';
+}
+
+function inferJsonShape(values: unknown[]): NonNullable<ProfileColumn['jsonShape']> {
+  const byKey = new Map<string, unknown[]>();
+  for (const value of values) {
+    const parsed = parseJsonObject(value);
+    if (!parsed) continue;
+    for (const [key, nested] of Object.entries(parsed)) {
+      const existing = byKey.get(key) ?? [];
+      existing.push(nested);
+      byKey.set(key, existing);
+    }
+  }
+
+  const shape: NonNullable<ProfileColumn['jsonShape']> = {};
+  for (const [key, nestedValues] of byKey.entries()) {
+    const scalarValues = nestedValues.filter((value) => value !== null && value !== undefined);
+    const counts = new Map<string, number>();
+    for (const value of scalarValues) {
+      if (typeof value === 'object') continue;
+      const canonical = canonicalValue(value);
+      counts.set(canonical, (counts.get(canonical) ?? 0) + 1);
+    }
+    const topValues = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([value, count]) => ({
+        value: parseStoredValue(value),
+        count,
+      }));
+    shape[key] = {
+      inferredType: inferType(scalarValues),
+      cardinality: counts.size,
+      topValues,
+    };
+  }
+
+  return shape;
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function tableMetadata(rows: Record<string, unknown>[]): {
+  schema?: string;
+  tableRole?: 'entity' | 'lookup' | 'junction' | 'config';
+  primaryKey: string[];
+  foreignKeys: Array<{ column: string; referencedTable: string; referencedColumn: string }>;
+} {
+  const first = rows[0] ?? {};
+  const foreignKeys = Array.isArray(first.__foreignKeys)
+    ? first.__foreignKeys.filter(isForeignKey)
+    : [];
+  return {
+    ...(typeof first.__schema === 'string' ? { schema: first.__schema } : {}),
+    ...(isTableRole(first.__tableRole) ? { tableRole: first.__tableRole } : {}),
+    primaryKey: Array.isArray(first.__primaryKey)
+      ? first.__primaryKey.filter((value): value is string => typeof value === 'string')
+      : [],
+    foreignKeys,
+  };
+}
+
+function isForeignKey(value: unknown): value is {
+  column: string;
+  referencedTable: string;
+  referencedColumn: string;
+} {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.column === 'string' &&
+    typeof item.referencedTable === 'string' &&
+    typeof item.referencedColumn === 'string'
+  );
+}
+
+function isTableRole(value: unknown): value is 'entity' | 'lookup' | 'junction' | 'config' {
+  return value === 'entity' || value === 'lookup' || value === 'junction' || value === 'config';
 }
 
 function canonicalValue(value: unknown): string {

@@ -19,6 +19,7 @@ import {
   renderTemplate,
 } from '../mapping/apply.js';
 import type { MappingDocument } from '../schemas/mapping.js';
+import type { MappingEntity } from '../schemas/mapping.js';
 import type { EmbeddingProvider } from '../providers/embeddings.js';
 import type { LlmProvider } from '../providers/llm.js';
 import { payloadHash, promptHash } from '../utils/hash.js';
@@ -26,6 +27,7 @@ import { enqueueJob } from '../queue/boss.js';
 import { EMBEDDINGS_GENERATE_JOB } from '../queue/jobs.js';
 import { getActiveMapping, getMappingByVersion } from './mappings.js';
 import { maybeTransitionSourceMaturity } from './maturity.js';
+import { toScalarString } from '../utils/scalar.js';
 
 const EMBEDDING_BATCH_SIZE = 50;
 const RAW_BATCH_SIZE = 500;
@@ -55,6 +57,11 @@ export async function indexSource(
 
   const mapping = await getActiveMapping(db, sourceId);
   const document = mapping.document as MappingDocument;
+  const allRawRows = await db
+    .select()
+    .from(sourceRecordsRaw)
+    .where(eq(sourceRecordsRaw.sourceId, sourceId));
+  const relationIndex = buildRelationIndex(allRawRows);
   let indexed = 0;
   const recordIdsForEmbedding: string[] = [];
   let offset = 0;
@@ -78,12 +85,19 @@ export async function indexSource(
 
       let data = applyFieldMapping(payload, entityDef.fields);
       data = applyRules(data, payload, entityDef.rules);
+      const relationData = applyRelationAggregates(entityDef, payload, relationIndex);
+      data = { ...data, ...relationData.data };
 
       if (entityDef.enrichment) {
         data = await enrichRecord(db, sourceId, raw.sourceRecordId, raw.payloadHash, data, entityDef, llmProvider);
       }
 
-      const searchSource = buildSearchSource(data, entityDef.fields);
+      const autoRelationText = buildAutoRelationSearchText(entityDef, payload, relationIndex);
+      const searchSource = [
+        buildSearchSource(data, entityDef.fields),
+        relationData.searchText,
+        autoRelationText,
+      ].filter(Boolean).join(' ').trim();
       const dataHash = payloadHash(data);
 
       const [existing] = await db
@@ -193,6 +207,135 @@ export async function indexSource(
     indexed,
     embeddingJobs: Math.ceil(embeddingRecordIds.length / EMBEDDING_BATCH_SIZE),
   };
+}
+
+type RawRelationRow = {
+  sourceRecordId: string;
+  payload: unknown;
+};
+
+type RawPayload = Record<string, unknown>;
+
+type RelationIndex = {
+  byTable: Map<string, RawPayload[]>;
+};
+
+function buildRelationIndex(rows: RawRelationRow[]): RelationIndex {
+  const byTable = new Map<string, RawPayload[]>();
+  for (const row of rows) {
+    const payload = row.payload as RawPayload;
+    const table = typeof payload.__table === 'string'
+      ? payload.__table
+      : parseSourceRecordParts(row.sourceRecordId).table;
+    const existing = byTable.get(table) ?? [];
+    existing.push(payload);
+    byTable.set(table, existing);
+  }
+  return { byTable };
+}
+
+function applyRelationAggregates(
+  entity: MappingEntity,
+  payload: RawPayload,
+  relationIndex: RelationIndex,
+): { data: Record<string, unknown>; searchText: string } {
+  const data: Record<string, unknown> = {};
+  const searchParts: string[] = [];
+
+  for (const aggregate of entity.relationAggregates ?? []) {
+    const sourceValue = toScalarString(payload[aggregate.sourceColumn]);
+    if (!sourceValue) continue;
+    const viaRows = (relationIndex.byTable.get(aggregate.viaTable) ?? [])
+      .filter((row) => toScalarString(row[aggregate.viaSourceColumn]) === sourceValue);
+    const values: string[] = [];
+    for (const via of viaRows) {
+      const targetValue = toScalarString(via[aggregate.viaTargetColumn]);
+      if (!targetValue) continue;
+      const target = (relationIndex.byTable.get(aggregate.targetTable) ?? [])
+        .find((row) => toScalarString(row[aggregate.targetColumn]) === targetValue);
+      if (!target) continue;
+      const labelColumn = aggregate.targetLabelColumn ?? pickLabelColumn(target);
+      const label = labelColumn ? toScalarString(target[labelColumn]) : targetValue;
+      if (label) values.push(label);
+    }
+
+    const unique = [...new Set(values)];
+    if (unique.length === 0) continue;
+    data[aggregate.field] = unique;
+    if (aggregate.searchable) {
+      searchParts.push(...unique);
+    }
+  }
+
+  return { data, searchText: searchParts.join(' ') };
+}
+
+function buildAutoRelationSearchText(
+  entity: MappingEntity,
+  payload: RawPayload,
+  relationIndex: RelationIndex,
+): string {
+  const sourceTable = entity.sourceTable;
+  const sourcePk = primaryKeyValue(payload);
+  if (!sourcePk) return '';
+
+  const labels: string[] = [];
+  for (const rows of relationIndex.byTable.values()) {
+    const sample = rows[0];
+    if (!sample || sample.__tableRole !== 'junction') continue;
+    const foreignKeys = readForeignKeys(sample);
+    const sourceFk = foreignKeys.find((fk) => fk.referencedTable === sourceTable);
+    if (!sourceFk) continue;
+    const targetFk = foreignKeys.find((fk) => fk !== sourceFk);
+    if (!targetFk) continue;
+
+    for (const row of rows) {
+      if (toScalarString(row[sourceFk.column]) !== sourcePk) continue;
+      const targetValue = toScalarString(row[targetFk.column]);
+      const target = (relationIndex.byTable.get(targetFk.referencedTable) ?? [])
+        .find((item) => toScalarString(item[targetFk.referencedColumn]) === targetValue);
+      if (!target) continue;
+      const labelColumn = pickLabelColumn(target);
+      const label = labelColumn ? toScalarString(target[labelColumn]) : targetValue;
+      if (label) labels.push(label);
+    }
+  }
+
+  return [...new Set(labels)].join(' ');
+}
+
+function primaryKeyValue(payload: RawPayload): string {
+  const primaryKey = Array.isArray(payload.__primaryKey)
+    ? payload.__primaryKey.filter((value): value is string => typeof value === 'string')
+    : [];
+  const key = primaryKey[0];
+  return key ? toScalarString(payload[key]) : '';
+}
+
+function pickLabelColumn(payload: RawPayload): string | null {
+  const candidates = ['nombre', 'name', 'titulo', 'title', 'descripcion', 'description', 'sku'];
+  return candidates.find((candidate) => payload[candidate] !== undefined && payload[candidate] !== null) ?? null;
+}
+
+function readForeignKeys(payload: RawPayload): Array<{
+  column: string;
+  referencedTable: string;
+  referencedColumn: string;
+}> {
+  if (!Array.isArray(payload.__foreignKeys)) return [];
+  return payload.__foreignKeys.filter((value): value is {
+    column: string;
+    referencedTable: string;
+    referencedColumn: string;
+  } => {
+    if (!value || typeof value !== 'object') return false;
+    const item = value as Record<string, unknown>;
+    return (
+      typeof item.column === 'string' &&
+      typeof item.referencedTable === 'string' &&
+      typeof item.referencedColumn === 'string'
+    );
+  });
 }
 
 export async function findRecordsMissingActiveEmbeddings(

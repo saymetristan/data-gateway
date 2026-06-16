@@ -1,11 +1,11 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
-import { records, sourceRecordsRaw, sources } from '../db/schema/index.js';
+import { mappings, records, sourceRecordsRaw, sources } from '../db/schema/index.js';
 import { createDatabaseConnector } from '../connectors/factory.js';
 import { GatewayError } from '../errors/gateway-error.js';
 import { payloadHash } from '../utils/hash.js';
 import { enqueueJob } from '../queue/boss.js';
-import { SOURCE_PROFILE_JOB } from '../queue/jobs.js';
+import { SOURCE_INDEX_JOB, SOURCE_PROFILE_JOB } from '../queue/jobs.js';
 import { getDecryptedSourceConfig, updateSourceConfig } from './sources.js';
 import type { TableSchema } from '../connectors/types.js';
 import { toScalarString } from '../utils/scalar.js';
@@ -52,7 +52,10 @@ export async function syncDatabaseSource(
   const seenRecordIdsByTable = new Map<string, Set<string>>();
 
   try {
-    const schema = await connector.introspectSchema();
+    const schema = (await connector.introspectSchema()).map((table) => ({
+      ...table,
+      tableRole: table.tableRole ?? classifyTable(table),
+    }));
     const tables = selectTables(schema, configuredTables);
 
     for (const table of tables) {
@@ -93,7 +96,15 @@ export async function syncDatabaseSource(
         const seenForTable = seenRecordIdsByTable.get(table.name) ?? new Set<string>();
         seenRecordIdsByTable.set(table.name, seenForTable);
         for (const row of batch) {
-          const payload = { ...row, __table: table.name };
+          const payload = {
+            ...row,
+            __table: table.name,
+            __schema: table.schema,
+            __primaryKey: table.primaryKey,
+            __pk: Object.fromEntries(table.primaryKey.map((key) => [key, row[key]])),
+            __foreignKeys: table.foreignKeys,
+            __tableRole: table.tableRole,
+          };
           const hash = payloadHash(payload);
           const externalId = table.primaryKey.map((key) => toScalarString(row[key])).join(':');
           const sourceRecordId = `${table.name}:${externalId}`;
@@ -170,12 +181,40 @@ export async function syncDatabaseSource(
       .set({ lastSyncedAt: new Date(), updatedAt: new Date() })
       .where(eq(sources.id, sourceId));
 
-    await enqueueJob(connectionString, SOURCE_PROFILE_JOB, { sourceId, workspaceId });
+    await enqueuePostSyncJobs(db, sourceId, workspaceId, connectionString);
 
     return { synced, tables: tables.map((table) => `${table.schema}.${table.name}`) };
   } finally {
     await connector.close();
   }
+}
+
+async function enqueuePostSyncJobs(
+  db: Database,
+  sourceId: string,
+  workspaceId: string,
+  connectionString: string,
+): Promise<void> {
+  await enqueueJob(connectionString, SOURCE_PROFILE_JOB, { sourceId, workspaceId });
+
+  const [activeMapping] = await db
+    .select({ id: mappings.id })
+    .from(mappings)
+    .where(and(eq(mappings.sourceId, sourceId), eq(mappings.status, 'active')))
+    .orderBy(desc(mappings.version))
+    .limit(1);
+
+  if (!activeMapping) return;
+  await enqueueJob(
+    connectionString,
+    SOURCE_INDEX_JOB,
+    {
+      sourceId,
+      workspaceId,
+      invalidateMaturity: false,
+    },
+    { singletonKey: `source-index:${sourceId}` },
+  );
 }
 
 async function removeStaleRecords(
@@ -227,4 +266,30 @@ function selectTables(schema: TableSchema[], configuredTables?: string[]): Table
     const qualified = `${table.schema}.${table.name}`;
     return selected.has(table.name) || selected.has(qualified);
   });
+}
+
+function classifyTable(table: TableSchema): 'entity' | 'lookup' | 'junction' | 'config' {
+  const primaryKey = new Set(table.primaryKey);
+  const foreignKeyColumns = new Set(table.foreignKeys.map((foreignKey) => foreignKey.column));
+  const nonKeyColumns = table.columns.filter(
+    (column) => !primaryKey.has(column.name) && !foreignKeyColumns.has(column.name),
+  );
+
+  if (
+    table.primaryKey.length >= 2 &&
+    table.foreignKeys.length >= 2 &&
+    nonKeyColumns.length <= 1
+  ) {
+    return 'junction';
+  }
+
+  if (table.name.toLowerCase().includes('config')) {
+    return 'config';
+  }
+
+  if (table.foreignKeys.length === 0 && table.columns.length <= 4) {
+    return 'lookup';
+  }
+
+  return 'entity';
 }

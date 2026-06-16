@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const mappingFieldTypeSchema = z.enum(['string', 'number', 'boolean', 'date']);
+export const mappingFieldTypeSchema = z.enum(['string', 'number', 'boolean', 'date', 'json']);
 
 export const mappingFieldSchema = z
   .object({
@@ -8,6 +8,12 @@ export const mappingFieldSchema = z
     sourceColumn: z.string().min(1),
     type: mappingFieldTypeSchema,
     description: z.string().optional(),
+    label: z.string().min(1).optional(),
+    filterLabel: z.string().min(1).optional(),
+    unit: z.string().min(1).optional(),
+    aliases: z.array(z.string().min(1)).default([]),
+    identifier: z.boolean().default(false),
+    jsonPath: z.string().min(1).optional(),
     searchable: z.boolean().default(false),
     filterable: z.boolean().default(false),
     visible: z.boolean().default(true),
@@ -26,6 +32,9 @@ export const mappingRuleConditionSchema = z.object({
 export const mappingRuleSchema = z
   .object({
     field: z.string().min(1),
+    label: z.string().min(1).optional(),
+    description: z.string().min(1).optional(),
+    aliases: z.array(z.string().min(1)).default([]),
     op: z.enum(['gt', 'gte', 'lt', 'lte', 'eq', 'neq']).optional(),
     column: z.string().min(1).optional(),
     value: z.union([z.string(), z.number(), z.boolean()]).optional(),
@@ -68,12 +77,32 @@ export const mappingEnrichmentSchema = z.object({
   ).min(1),
 });
 
+export const mappingRelationAggregateSchema = z.object({
+  field: z.string().min(1),
+  label: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  viaTable: z.string().min(1),
+  sourceColumn: z.string().min(1),
+  viaSourceColumn: z.string().min(1),
+  viaTargetColumn: z.string().min(1),
+  targetTable: z.string().min(1),
+  targetColumn: z.string().min(1).default('id'),
+  targetLabelColumn: z.string().min(1).optional(),
+  searchable: z.boolean().default(true),
+  visible: z.boolean().default(true),
+});
+
 export const mappingEntitySchema = z.object({
   entity: z.string().min(1),
   description: z.string().optional(),
+  displayName: z.string().min(1).optional(),
+  pluralLabel: z.string().min(1).optional(),
+  sourceKind: z.enum(['entity', 'lookup', 'junction', 'config']).optional(),
+  exposeAsTool: z.boolean().optional(),
   sourceTable: z.string().min(1),
   fields: z.array(mappingFieldSchema).min(1),
   rules: z.array(mappingRuleSchema).default([]),
+  relationAggregates: z.array(mappingRelationAggregateSchema).default([]),
   defaultFilters: z.array(mappingDefaultFilterSchema).default([]),
   embeddingTextTemplate: z.string().min(1),
   enrichment: mappingEnrichmentSchema.optional(),
@@ -83,10 +112,29 @@ export const mappingDocumentSchema = z.object({
   entities: z.array(mappingEntitySchema).min(1),
 });
 
-export type MappingDocument = z.infer<typeof mappingDocumentSchema>;
-export type MappingEntity = z.infer<typeof mappingEntitySchema>;
-export type MappingField = z.infer<typeof mappingFieldSchema>;
-export type MappingRule = z.infer<typeof mappingRuleSchema>;
+type ParsedMappingField = z.infer<typeof mappingFieldSchema>;
+type ParsedMappingRule = z.infer<typeof mappingRuleSchema>;
+type ParsedMappingEntity = z.infer<typeof mappingEntitySchema>;
+
+export type MappingField = Omit<ParsedMappingField, 'aliases' | 'identifier'> & {
+  aliases?: string[];
+  identifier?: boolean;
+};
+export type MappingRule = Omit<ParsedMappingRule, 'aliases'> & {
+  aliases?: string[];
+};
+export type MappingRelationAggregate = z.infer<typeof mappingRelationAggregateSchema>;
+export type MappingEntity = Omit<
+  ParsedMappingEntity,
+  'fields' | 'rules' | 'relationAggregates'
+> & {
+  fields: MappingField[];
+  rules: MappingRule[];
+  relationAggregates?: MappingRelationAggregate[];
+};
+export type MappingDocument = Omit<z.infer<typeof mappingDocumentSchema>, 'entities'> & {
+  entities: MappingEntity[];
+};
 
 export const createMappingSchema = z.object({
   document: mappingDocumentSchema,

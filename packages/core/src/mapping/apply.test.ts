@@ -61,6 +61,44 @@ describe('mapping apply', () => {
     expect(text).toBe('A - SKU-1');
   });
 
+  it('extrae valores desde columnas JSON con jsonPath', () => {
+    const data = applyFieldMapping(
+      {
+        atributos: {
+          litros: 1100,
+          material: 'Polietileno tricapa',
+        },
+      },
+      [
+        {
+          name: 'capacity_liters',
+          sourceColumn: 'atributos',
+          jsonPath: '$.litros',
+          type: 'number',
+          searchable: false,
+          filterable: true,
+          visible: true,
+          sensitive: false,
+        },
+        {
+          name: 'material',
+          sourceColumn: 'atributos',
+          jsonPath: '$.material',
+          type: 'string',
+          searchable: true,
+          filterable: true,
+          visible: true,
+          sensitive: false,
+        },
+      ],
+    );
+
+    expect(data).toMatchObject({
+      capacity_liters: 1100,
+      material: 'Polietileno tricapa',
+    });
+  });
+
   it('no incluye campos sensitive en search source aunque estén marcados searchable', () => {
     const text = buildSearchSource(
       { name: 'Producto', cost: 12.5 },

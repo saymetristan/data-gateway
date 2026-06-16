@@ -8,7 +8,8 @@ export function applyFieldMapping(
   const result: Record<string, unknown> = {};
   for (const field of fields) {
     const raw = payload[field.sourceColumn];
-    result[field.name] = coerceValue(raw, field.type);
+    const value = field.jsonPath ? readJsonPath(raw, field.jsonPath) : raw;
+    result[field.name] = coerceValue(value, field.type);
   }
   return result;
 }
@@ -121,10 +122,23 @@ function coerceValue(value: unknown, type: MappingField['type']): unknown {
       return toScalarString(value).toLowerCase() === 'true' || value === 1 || value === '1';
     case 'date':
       return toScalarString(value);
+    case 'json':
+      return value;
     case 'string':
     default:
       return toScalarString(value);
   }
+}
+
+function readJsonPath(value: unknown, path: string): unknown {
+  if (!path.startsWith('$.')) return value;
+  let current = value;
+  for (const segment of path.slice(2).split('.')) {
+    if (!segment) continue;
+    if (current === null || typeof current !== 'object') return null;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current ?? null;
 }
 
 export function getExternalId(

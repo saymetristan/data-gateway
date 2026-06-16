@@ -27,6 +27,7 @@ export type TableSchema = {
   columns: ColumnSchema[];
   primaryKey: string[];
   foreignKeys: ForeignKeySchema[];
+  tableRole?: 'entity' | 'lookup' | 'junction' | 'config';
   cursorColumn?: string;
 };
 
