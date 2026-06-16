@@ -24,7 +24,7 @@ export function validateMappingAgainstProfile(
           `Field "${field.name}" references unknown column "${field.sourceColumn}" in table "${entity.sourceTable}"`,
         );
       }
-      if (!isCompatibleType(field.type, column.inferredType)) {
+      if (!isCompatibleType(field.type, column.inferredType, field.jsonPath)) {
         throw GatewayError.unprocessable(
           `Field "${field.name}" type "${field.type}" is incompatible with profile type "${column.inferredType}"`,
         );
@@ -131,7 +131,14 @@ export function validateMappingAgainstProfile(
   }
 }
 
-function isCompatibleType(mappingType: string, profileType: string): boolean {
+function isCompatibleType(
+  mappingType: string,
+  profileType: string,
+  jsonPath?: string,
+): boolean {
+  if (jsonPath && profileType === 'json') {
+    return ['string', 'number', 'boolean', 'date', 'json'].includes(mappingType);
+  }
   if (mappingType === 'string') {
     return ['string', 'unknown', 'json', 'datetime'].includes(profileType);
   }
