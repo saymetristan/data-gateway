@@ -1,0 +1,40 @@
+---
+title: "Onboarding: CSV"
+description: "Sube archivos de datos de forma estática o como carga de validación."
+---
+
+# Subida de Archivos CSV
+
+El conector `csv` es perfecto para subir catálogos que no cambian a menudo, listas de ubicaciones, reglas de negocio o para hacer pruebas de concepto rápidas sin abrir un puerto a la base de datos.
+
+## 1. Crear la fuente CSV vacía
+
+Primero, debes registrar la fuente en tu Workspace. Su configuración inicial va vacía.
+
+```bash
+export WORKSPACE_KEY="dgw_live_tu_api_key_aqui"
+
+curl -X POST "https://data.whaapy.com/sources" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "csv",
+    "name": "Catálogo Estático",
+    "config": {}
+  }'
+```
+
+Guarda el `id` que se retorna en la respuesta. Lo utilizaremos para el siguiente paso.
+
+## 2. Subir el archivo de datos
+
+Realiza una petición para subir el archivo en crudo. El archivo no debe ser excesivamente grande en esta modalidad de endpoint único (típicamente algunos MBs son manejados correctamente).
+
+```bash
+curl -X POST "https://data.whaapy.com/sources/{source_id}/upload" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: text/csv" \
+  --data-binary @mi_catalogo.csv
+```
+
+El backend procesará el CSV de forma asíncrona, asumiendo la primera fila como cabeceras. La fuente pasará al estado `profiled`, lista para que definas tu [Mapeo Semántico](/onboarding/mapping-guide).

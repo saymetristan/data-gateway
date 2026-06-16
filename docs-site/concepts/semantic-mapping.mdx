@@ -1,0 +1,93 @@
+---
+title: "Mapeo Semántico"
+description: "Configurando cómo la IA verá tus datos y cómo los podrá buscar."
+---
+
+# Mapeo Semántico
+
+El archivo de mapeo es un documento JSON que le indica al Data Gateway **cómo interpretar el esquema de origen** y **qué exponer** a los agentes de IA.
+
+Sin un mapeo, el sistema no sabe distinguir entre una clave primaria interna, un campo de texto relevante o información confidencial.
+
+## Conceptos del Mapeo
+
+El mapping JSON agrupa tu base de datos en **Entidades** (`entities`). Cada entidad expone una o más herramientas en el MCP (por ejemplo, la entidad `product` genera `search_product`).
+
+### Entidad (Entity)
+
+Define el elemento principal.
+- `entity`: Nombre técnico de la entidad (ej. `"product"`).
+- `displayName`, `pluralLabel`: Nombres para mostrar y describir la herramienta al LLM.
+- `sourceTable`: Tabla o conjunto de datos de origen (ej. `"catalog_items"`).
+- `embeddingTextTemplate`: Plantilla que dicta cómo concatenar campos para la generación de vectores (ej. `"Producto: {{name}}. Color: {{color}}"`).
+
+### Campos (Fields)
+
+Por cada columna que desees integrar, declaras un campo con sus atributos de visibilidad y comportamiento.
+
+| Propiedad | Descripción |
+| --- | --- |
+| `name` | El nombre del campo tal como lo verá el agente. |
+| `sourceColumn` | El nombre original en tu base de datos. |
+| `type` | `"string"`, `"number"`, `"boolean"`, `"date"` o `"json"`. |
+| `searchable` | `true` si este campo debe buscarse mediante texto libre (full-text search). |
+| `filterable` | `true` si se permite al agente filtrar por este campo estrictamente (ej. `price < 100`). |
+| `visible` | `true` por defecto. Si es `false`, el agente nunca lo verá en las respuestas. |
+| `sensitive` | `true` si el campo es confidencial (ej. costos, datos personales). Un campo sensible **no puede** ser `searchable` ni `filterable`. |
+
+### Filtros por Defecto (Default Filters)
+
+Puedes añadir condiciones a la entidad que el agente **nunca** podrá modificar o evitar. Por ejemplo, forzar que la IA solo busque productos activos.
+
+```json
+"defaultFilters": [
+  { "field": "status", "op": "eq", "value": "active" }
+]
+```
+
+## Ejemplo Simplificado
+
+```json
+{
+  "document": {
+    "entities": [
+      {
+        "entity": "product",
+        "displayName": "Producto",
+        "sourceTable": "products",
+        "embeddingTextTemplate": "{{name}} - {{description}}",
+        "fields": [
+          {
+            "name": "id",
+            "sourceColumn": "sku_code",
+            "type": "string",
+            "identifier": true
+          },
+          {
+            "name": "name",
+            "sourceColumn": "title",
+            "type": "string",
+            "searchable": true
+          },
+          {
+            "name": "price",
+            "sourceColumn": "cost",
+            "type": "number",
+            "filterable": true
+          },
+          {
+            "name": "internal_margin",
+            "sourceColumn": "margin",
+            "type": "number",
+            "sensitive": true,
+            "visible": false
+          }
+        ],
+        "defaultFilters": []
+      }
+    ]
+  }
+}
+```
+
+Al subir este mapeo, cuando la fuente pase a `agent_ready`, el agente tendrá disponible la herramienta `search_product`, donde podrá aplicar el filtro `price`, y nunca tendrá acceso al campo `internal_margin`.

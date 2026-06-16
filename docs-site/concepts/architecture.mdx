@@ -1,0 +1,43 @@
+---
+title: "Arquitectura"
+description: "Visión general de cómo fluyen los datos y consultas en el Data Gateway."
+---
+
+# Arquitectura
+
+Tsuzuro Data Gateway está diseñado como un intermediario seguro (sandbox) entre tus datos de origen y los modelos de lenguaje (LLMs) o agentes que los consumen.
+
+## Componentes principales
+
+<CardGroup cols={2}>
+  <Card title="Ingesta y Conectores" icon="database">
+    Extraen datos de bases de datos externas, APIs (Shopify) o CSVs, creando un perfil estadístico de las columnas disponibles.
+  </Card>
+  <Card title="Índice Vectorial" icon="magnifying-glass">
+    Los registros se indexan de manera asíncrona generando embeddings. La búsqueda se realiza combinando métodos léxicos y vectoriales.
+  </Card>
+  <Card title="API Core" icon="code">
+    Un servicio REST que expone endpoints para administrar `sources`, `mappings`, `evals` y para realizar consultas puras (`/query`).
+  </Card>
+  <Card title="Servidor MCP" icon="server">
+    Un servidor independiente compatible con el protocolo MCP. Transforma los endpoints de búsqueda en `tools` dinámicas (`search_*`).
+  </Card>
+</CardGroup>
+
+## Flujo de datos e ingesta
+
+Cuando creas una fuente de datos, el flujo interno se compone de varias fases automatizadas mediante trabajos en segundo plano (`pg-boss`):
+
+1. **Extracción (Raw):** Los conectores traen datos sin transformar de manera segura y en modo de solo lectura.
+2. **Perfilado (Profiling):** Se identifican los tipos de datos y la completitud de las columnas para ayudarte a configurar el mapeo.
+3. **Mapeo y Transformación:** Se aplica tu archivo JSON de mapeo para transformar la estructura de origen a una estructura orientada a entidades (ej. `products`, `orders`).
+4. **Indexación:** Los textos relevantes se convierten en vectores densos, almacenándose junto a representaciones léxicas en la base de datos interna.
+
+## Flujo de consulta (Query Path)
+
+Cuando el agente llama a una herramienta MCP, sucede lo siguiente en el motor de búsqueda:
+
+1. **Extracción de Filtros:** Si el agente envió argumentos determinísticos (ej. `precio < 100`), se aplican estrictamente en SQL. No interviene un LLM para generarlos.
+2. **Búsqueda Híbrida:** Se ejecuta de forma concurrente una búsqueda por texto completo (Full-Text Search) y una búsqueda por similitud vectorial (HNSW), combinando los resultados usando Reciprocal Rank Fusion (RRF).
+3. **Cálculo de Confianza:** Se asigna un puntaje (Confidence) al resultado basándose en las señales de recuperación, dándole al agente un indicador determinístico de qué tan precisa fue la búsqueda.
+4. **Respuesta Tipada:** Se filtran los campos marcados como `sensitive` y se envía la carga final formateada al agente.

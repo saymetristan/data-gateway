@@ -1,0 +1,53 @@
+---
+title: "Cursor y Claude Desktop"
+description: "Usa el conector stdio local para probar y desarrollar."
+---
+
+# Cursor y Claude Desktop (stdio)
+
+Para herramientas de desarrollo o clientes de escritorio que utilizan el protocolo MCP mediante comunicación de terminal estándar (stdio), hemos publicado el paquete oficial en npm.
+
+## 1. Instalar o Ejecutar vía npx
+
+El paquete `@whaapy/data-gateway-mcp` contiene un binario llamado `data-gateway-mcp`. Puedes instalarlo globalmente o ejecutarlo mediante `npx`.
+
+```bash
+# Instalación global (recomendado para integraciones persistentes)
+npm i -g @whaapy/data-gateway-mcp
+```
+
+## 2. Configurar en Claude Desktop
+
+Edita tu archivo de configuración de Claude Desktop (generalmente `claude_desktop_config.json`).
+
+```json
+{
+  "mcpServers": {
+    "data-gateway": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@whaapy/data-gateway-mcp"
+      ],
+      "env": {
+        "GATEWAY_URL": "https://data.whaapy.com",
+        "GATEWAY_API_KEY": "dgw_live_tu_api_key"
+      }
+    }
+  }
+}
+```
+
+## 3. Configurar en Cursor
+
+En Cursor IDE, navega a **Settings > Features > MCP** y agrega un nuevo servidor:
+
+- **Type:** `command`
+- **Name:** `data-gateway`
+- **Command:** `npx -y @whaapy/data-gateway-mcp`
+
+En la sección de variables de entorno para ese servidor, añade:
+- `GATEWAY_URL`: `https://data.whaapy.com`
+- `GATEWAY_API_KEY`: `dgw_live_tu_api_key`
+
+A partir de este momento, puedes pedirle a la IA del IDE que "Busque un producto en el Data Gateway" y Cursor sabrá invocar la herramienta correctamente.

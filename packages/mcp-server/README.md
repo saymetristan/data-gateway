@@ -2,6 +2,8 @@
 
 Servidor MCP de referencia para el Data Gateway. Consume el manifest REST (`GET /tools`) y ejecuta tools vía `POST /tools/:name/invoke`.
 
+> **Nota para usuarios:** La documentación completa para clientes y desarrolladores se encuentra ahora en el sitio [Docs Site](../docs-site/). Úsalo para instrucciones paso a paso de uso y extensión.
+
 ## Requisitos
 
 - API key de workspace con scopes `tools:read` y `tools:invoke` (o `*`)
@@ -19,7 +21,7 @@ Servidor MCP de referencia para el Data Gateway. Consume el manifest REST (`GET 
 
 ```bash
 pnpm --filter @data-gateway/mcp-server build
-GATEWAY_URL=http://localhost:3000 GATEWAY_API_KEY=dgw_... pnpm --filter @data-gateway/mcp-server start:stdio
+GATEWAY_URL=http://localhost:3000 GATEWAY_API_KEY=dgw_live_tu_api_key_aqui pnpm --filter @data-gateway/mcp-server start:stdio
 ```
 
 Ejemplo de configuración MCP:
@@ -32,7 +34,7 @@ Ejemplo de configuración MCP:
       "args": ["/ruta/al/repo/packages/mcp-server/dist/stdio.js"],
       "env": {
         "GATEWAY_URL": "http://localhost:3000",
-        "GATEWAY_API_KEY": "dgw_..."
+        "GATEWAY_API_KEY": "dgw_live_tu_api_key_aqui"
       }
     }
   }
@@ -42,7 +44,7 @@ Ejemplo de configuración MCP:
 ## Streamable HTTP
 
 ```bash
-GATEWAY_URL=http://localhost:3000 GATEWAY_API_KEY=dgw_... pnpm --filter @whaapy/data-gateway-mcp start:http
+GATEWAY_URL=http://localhost:3000 GATEWAY_API_KEY=dgw_live_tu_api_key_aqui pnpm --filter @whaapy/data-gateway-mcp start:http
 ```
 
 Endpoint MCP: `http://0.0.0.0:3100/mcp`.
@@ -58,7 +60,7 @@ Configura en Whaapy:
 - URL: `https://mcp.data.whaapy.com/mcp`
 - Transporte: Streamable HTTP
 - Auth: `bearer`
-- Token: API key del workspace (`dgw_...`) con scopes `tools:read` y `tools:invoke`
+- Token: API key del workspace (`dgw_live_...`) con scopes `tools:read` y `tools:invoke`
 
 Whaapy hará `initialize`, `tools/list` y `tools/call`. Las respuestas usan un envelope JSON dentro de `content[0].text`:
 

@@ -1,0 +1,35 @@
+---
+title: "Scopes"
+description: "Control de acceso granular a las acciones de la API."
+---
+
+# Scopes
+
+Cada API Key generada para un Workspace tiene asignada una matriz de permisos (`scopes`). Por seguridad, se recomienda utilizar el mínimo privilegio posible (Principio de Mínimo Privilegio).
+
+| Scope | Descripción | Endpoint principal |
+| --- | --- | --- |
+| `*` | Acceso total (Administrador de Workspace). Permite hacer cualquier acción en el workspace correspondiente. | Todos los endpoints de Workspace. |
+| `sources:read` | Permite leer las configuraciones y estados de los sources. | `GET /sources` |
+| `sources:write` | Permite crear fuentes, subir mappings y forzar indexaciones. | `POST /sources` |
+| `query:execute` | Permite invocar la API determinística directa de búsqueda. | `POST /query` |
+| `tools:read` | Permite leer el manifiesto del MCP. | `GET /tools` |
+| `tools:invoke` | Permite ejecutar una de las tools compiladas del MCP. | `POST /tools/:name/invoke` |
+| `evals:read` | Permite listar y leer casos de evaluación. | `GET /evals/sets` |
+| `evals:write` | Permite definir reglas de evaluación y forzar corridas (runs). | `POST /evals/run` |
+| `logs:read` | Permite descargar y auditar el uso de búsqueda. | `GET /query-logs` |
+
+## Escenarios Recomendados
+
+**Agente MCP / Orquestador (Whaapy, Cursor, Claude):**
+Crea una clave que tenga estrictamente:
+```json
+["tools:read", "tools:invoke"]
+```
+De esta forma el LLM (y el motor detrás de él) no podrá modificar jamás los mapeos ni leer tus métricas u otras conexiones.
+
+**Integración Backend Custom:**
+Si llamas al motor de búsqueda directamente desde tu propio código de Next.js, Django, etc:
+```json
+["query:execute"]
+```

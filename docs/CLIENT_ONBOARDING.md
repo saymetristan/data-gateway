@@ -1,4 +1,6 @@
-# Onboarding de cliente real
+# Onboarding de cliente real (Runbook Interno)
+
+> **Importante:** Esta es la guía operativa interna para el equipo de Whaapy. Si eres un cliente buscando conectar tus datos, dirígete a las [Documentaciones Públicas (Docs Site)](../docs-site/onboarding/overview.mdx).
 
 Flujo operativo para llevar un cliente de cero a `agent_ready` + MCP en Whaapy.
 
@@ -29,7 +31,7 @@ sequenceDiagram
 
 ## 1. Workspace y API key
 
-Una key de workspace sirve para **API y MCP** (mismo `dgw_...` como bearer).
+Una key de workspace sirve para **API y MCP** (mismo `dgw_live_...` como bearer).
 
 ```bash
 export GATEWAY_URL=https://data.whaapy.com
@@ -60,7 +62,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO data_gateway
 ```
 
 ```bash
-export WORKSPACE_KEY=dgw_...
+export WORKSPACE_KEY=dgw_live_tu_api_key_aqui
 
 curl -X POST "$GATEWAY_URL/sources" \
   -H "Authorization: Bearer $WORKSPACE_KEY" \
@@ -76,6 +78,33 @@ curl -X POST "$GATEWAY_URL/sources" \
 ```
 
 La API valida read-only (422 si tiene write). Sync y profiling se encolan solos.
+
+## 2b. Fuente Shopify
+
+Para apps nuevas creadas desde enero 2026, Shopify ya no entrega un `shpat_...` permanente en UI. Usa `client_credentials`: guardamos `clientId/clientSecret` y el Gateway pide tokens Admin API de corta vida en runtime. Scopes mínimos en Shopify: `read_products`, `read_inventory`.
+
+```bash
+export WORKSPACE_KEY=dgw_...
+export SHOPIFY_CLIENT_ID=...
+export SHOPIFY_CLIENT_SECRET=...
+export SHOPIFY_WEBHOOK_SECRET=...
+
+curl -X POST "$GATEWAY_URL/sources" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type":"shopify",
+    "name":"Shopify",
+    "config":{
+      "shopDomain":"bayon.myshopify.com",
+      "clientId":"'"$SHOPIFY_CLIENT_ID"'",
+      "clientSecret":"'"$SHOPIFY_CLIENT_SECRET"'",
+      "webhookSecret":"'"$SHOPIFY_WEBHOOK_SECRET"'"
+    }
+  }'
+```
+
+La API normaliza el dominio, intercambia client credentials por token Admin API, valida conexión, cifra credenciales, encola sync inicial y registra webhooks si `PUBLIC_API_URL` está configurado. Fuentes legacy con `accessToken` siguen soportadas.
 
 ## 3. Mapping (paso crítico)
 
@@ -147,6 +176,22 @@ ADMIN_API_KEY=... GATEWAY_URL=https://data.whaapy.com \
   --tables products,variants
 ```
 
+Shopify:
+
+```bash
+ADMIN_API_KEY=... GATEWAY_URL=https://data.whaapy.com \
+SHOPIFY_CLIENT_ID=... SHOPIFY_CLIENT_SECRET=... SHOPIFY_WEBHOOK_SECRET=... \
+  ./scripts/onboard-client.sh \
+  --name "Bayon" --slug bayon \
+  --type shopify \
+  --shop-domain bayon.myshopify.com \
+  --evals ./bayon-evals.json \
+  --activate \
+  --print-secrets
+```
+
+Para producción, `--evals` debe contener casos reales del cliente con `expectedExternalIds`, `mustApplyFilters` o `mustNotContainFields`. No uses `fixtures/shopify-evals.json` para un catálogo real; esos IDs son del mock.
+
 ## Monitoreo post-onboarding
 
 | Check | URL | Esperado |
@@ -167,4 +212,4 @@ npm i -g @whaapy/data-gateway-mcp
 GATEWAY_URL=https://data.whaapy.com node node_modules/@whaapy/data-gateway-mcp/dist/http.js
 ```
 
-Para stdio local: `GATEWAY_API_KEY=dgw_... data-gateway-mcp`.
+Para stdio local: `GATEWAY_API_KEY=dgw_live_... data-gateway-mcp`.

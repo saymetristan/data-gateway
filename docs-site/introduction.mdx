@@ -1,0 +1,26 @@
+---
+title: "Introduction"
+description: "Qué es Data Gateway y cómo te ayuda a conectar tus fuentes de datos con agentes de IA."
+---
+
+# Tsuzuro Data Gateway
+
+El **Data Gateway** es la capa de infraestructura que convierte tus fuentes de negocio (bases de datos SQL, catálogos de Shopify, archivos CSV) en herramientas (tools) tipadas y consultables de manera determinística por agentes de Inteligencia Artificial.
+
+En lugar de que un LLM tenga acceso crudo a tu base de datos y pueda cometer errores generando consultas SQL, el Data Gateway expone una interfaz acotada, validada y optimizada para recuperación híbrida (texto + vectores).
+
+## ¿Por qué usar Data Gateway?
+
+- **Consultas sin SQL en el agente:** Los agentes de IA no necesitan conocer tu esquema de base de datos ni generar código. Simplemente llaman a herramientas como `search_product` o `check_availability_order`.
+- **Determinismo y seguridad:** El gateway filtra y busca basándose en reglas que tú defines. Nunca usa un LLM para crear las consultas directamente a tu DB de producción.
+- **Campos protegidos:** El mapeo semántico te permite ocultar campos sensibles que nunca deben ser expuestos al agente, aunque existan en la base de datos de origen.
+- **Evals como compuerta de calidad:** Ninguna herramienta se activa para los agentes si no ha superado pruebas predefinidas (evaluaciones) que tú diseñas para asegurar resultados precisos.
+- **Protocolo MCP nativo:** Exponemos las herramientas siguiendo el **Model Context Protocol (MCP)**, siendo 100% compatibles con Whaapy, Claude Desktop, Cursor y cualquier orquestador moderno.
+
+## Casos de uso
+
+- Tienes un catálogo de productos en tu base de datos que quieres hacer buscable por un asistente de ventas en Whaapy.
+- Tienes tu inventario y datos de órdenes en Shopify y quieres que un agente de soporte consulte información rápidamente.
+- Tienes archivos CSV con datos de ubicaciones, reglas de negocio o manuales que necesitas incorporar al contexto de la IA de manera estructurada.
+
+En la siguiente sección te mostramos cómo empezar tu integración.

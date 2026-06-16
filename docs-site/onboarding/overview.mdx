@@ -1,0 +1,22 @@
+---
+title: "Overview de Onboarding"
+description: "Paso a paso de cómo conectar tus datos y hacerlos disponibles."
+---
+
+# Onboarding de Fuentes
+
+Para exponer una nueva fuente de datos a los agentes de IA, debes seguir un proceso formal que asegura que los datos sean legibles, mapeables y evaluados.
+
+## Resumen del Flujo
+
+1. **Workspace y Autenticación:** Se necesita un entorno (Workspace) y una API key (`dgw_live_...`). Si eres cliente de Whaapy, nosotros te entregaremos esta clave.
+2. **Creación de la Fuente (Source):** Configuras el conector que corresponda (`database_url`, `shopify`, o `csv`). La fuente entra en estado `connected`.
+3. **Mapeo Semántico (Mapping):** Revisas el perfil de tus datos (`profiled`) y escribes un JSON declarando qué entidades y campos compartirás. Súbelo a la API. La fuente pasa a `mapped`.
+4. **Indexación:** Al indexar, los datos originales se copian a nuestro almacén de vectores optimizado. La fuente pasa a `indexed`.
+5. **Validación:** Defines un conjunto de Evals (Evaluaciones) con preguntas reales y los resultados esperados. Al ejecutarlos exitosamente, la fuente alcanza `validated`.
+6. **Activación:** Finalmente, marcas la fuente como `agent_ready` mediante el endpoint de activación. Desde este momento, aparece en el MCP.
+
+Elige tu conector para ver los pasos detallados:
+- [Conexión a Base de Datos (URL)](/onboarding/database-url)
+- [Conexión con Shopify](/onboarding/shopify)
+- [Subida de archivos CSV](/onboarding/csv)

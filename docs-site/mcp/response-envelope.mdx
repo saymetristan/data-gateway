@@ -1,0 +1,79 @@
+---
+title: "Envelope de Respuesta"
+description: "El formato estándar de las respuestas que los agentes reciben."
+---
+
+# Envelope de Respuesta
+
+Dado que el servidor MCP devuelve contenido al LLM en forma de texto, estandarizamos todas las respuestas exitosas y de error mediante un "Envelope" (sobre) JSON consistente.
+
+Esto evita que los agentes "alucinen" al tratar de interpretar códigos de error HTTP, dándoles información descriptiva y clara en todo momento.
+
+## Formato en caso de Éxito
+
+Cuando la búsqueda retorna resultados válidos:
+
+```json
+{
+  "ok": true,
+  "status": "success",
+  "data": {
+    "results": [ ... ],
+    "applied_filters": [ ... ],
+    "confidence": 0.85
+  },
+  "toolName": "search_product",
+  "safety": "read_only",
+  "durationMs": 419
+}
+```
+
+## Formato cuando faltan datos (Búsqueda vacía)
+
+El Gateway es capaz de instruir proactivamente al agente cuando una búsqueda no produjo resultados, modificando el `status` e incluyendo el campo `nextQuestion` para darle instrucciones al LLM sobre cómo pedirle más detalles al usuario humano.
+
+```json
+{
+  "ok": false,
+  "status": "needs_more_info",
+  "data": {
+    "results": []
+  },
+  "nextQuestion": "No encontré resultados con esos datos. ¿Me compartes más detalle, otro identificador o una característica diferente?",
+  "toolName": "search_product",
+  "safety": "read_only",
+  "durationMs": 150
+}
+```
+
+## Formato de Error
+
+En caso de fallo técnico, validación incorrecta, o limitación de tasa (rate-limits), el envelope protege la caída e informa al agente, traduciendo el problema a lenguaje natural (`message_es`).
+
+```json
+{
+  "ok": false,
+  "status": "failed",
+  "errors": [
+    {
+      "code": "http_422",
+      "message": "Validation Error",
+      "message_es": "Los argumentos enviados a la herramienta no son válidos.",
+      "retryable": false
+    }
+  ],
+  "toolName": "search_product",
+  "safety": "read_only",
+  "durationMs": 55
+}
+```
+
+### Posibles traducciones nativas
+
+El servidor MCP incluye traducciones preparadas para los códigos de la API REST que los agentes pueden comprender:
+
+- **401**: "La API key del Data Gateway es inválida o no fue enviada."
+- **403**: "La API key no tiene permisos suficientes para usar esta herramienta."
+- **422**: "Los argumentos enviados a la herramienta no son válidos."
+- **429**: "Se alcanzó el límite de uso de la API. Intenta de nuevo en unos segundos."
+- **5xx**: "El sistema externo no respondió correctamente. Intenta más tarde o transfiere a humano."

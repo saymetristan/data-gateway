@@ -1,0 +1,50 @@
+---
+title: "Onboarding: Shopify"
+description: "Conecta tu tienda y mantén sincronizado tu inventario en tiempo real."
+---
+
+# Conexión con Shopify
+
+La integración con Shopify utiliza credenciales de aplicación nativa. El Gateway se encargará de configurar webhooks para mantener el catálogo al día sin necesidad de escaneos masivos constantes.
+
+## 1. Crear aplicación en Shopify
+
+En el panel de tu tienda Shopify, crea una Custom App y configúrala para que provea credenciales del tipo **Client Credentials**. Asegúrate de otorgarle al menos los siguientes "Admin API access scopes":
+
+- `read_products`
+- `read_inventory`
+
+Necesitas recolectar tres valores desde Shopify:
+- **Client ID**
+- **Client Secret**
+- **Webhook Secret** (Se utiliza para validar las firmas de los webhooks que envía Shopify).
+
+## 2. Crear la fuente en el Data Gateway
+
+```bash
+export WORKSPACE_KEY="dgw_live_tu_api_key_aqui"
+
+curl -X POST "https://data.whaapy.com/sources" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "shopify",
+    "name": "Mi Tienda Shopify",
+    "config": {
+      "shopDomain": "mi-tienda.myshopify.com",
+      "clientId": "tu_client_id",
+      "clientSecret": "tu_client_secret",
+      "webhookSecret": "tu_webhook_secret"
+    }
+  }'
+```
+
+### ¿Qué ocurre en el fondo?
+El Data Gateway:
+1. Normaliza tu dominio (ej. `mi-tienda.myshopify.com`).
+2. Usa el ID y el Secret para obtener tokens de corta duración dinámicos, validando que el acceso es correcto.
+3. Cifra tus credenciales.
+4. Encola la sincronización inicial de productos.
+5. Inscribe de manera automática los webhooks (`products/create`, `products/update`, `products/delete`) apuntando al Gateway para reflejar cambios en tu catálogo casi en tiempo real.
+
+Una vez que la sincronización termina, tu fuente estará en el estado de `profiled` y lista para que subas tu [Mapeo Semántico](/onboarding/mapping-guide).

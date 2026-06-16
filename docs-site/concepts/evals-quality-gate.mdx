@@ -1,0 +1,32 @@
+---
+title: "Evals como Compuerta de Calidad"
+description: "Cómo garantizar que las búsquedas devuelven los resultados correctos antes de usarlas en producción."
+---
+
+# Evals como Compuerta de Calidad
+
+Los LLMs pueden ser impredecibles. Para asegurar que tus usuarios o tus flujos automatizados tengan experiencias confiables, el Data Gateway implementa un sistema de **Evaluaciones (Evals)** obligatorio.
+
+No puedes marcar una fuente como `agent_ready` si no tienes Evaluaciones aprobadas.
+
+## ¿Por qué evaluar?
+
+Cuando el agente de IA llama a la herramienta `search_product(query="camiseta roja")`, el gateway ejecuta su algoritmo de búsqueda híbrida. Las *Evals* son "pruebas unitarias" sobre este algoritmo aplicado a **tus datos**. Verifican que la búsqueda "camiseta roja" de verdad devuelve en primer lugar el `ID` de la camiseta roja en tu base de datos, y que los filtros semánticos (si los definiste) están funcionando correctamente.
+
+## Sets y Casos de Evaluación
+
+Un **Evaluation Set** contiene múltiples preguntas típicas de tu negocio (**Cases**).
+
+Para cada caso (query), tú defines los `expectedExternalIds` (los IDs de origen que sabes que son correctos para esa pregunta). Adicionalmente, puedes requerir que ciertos filtros se apliquen o que ciertos campos no se revelen.
+
+### Ejemplo de flujo
+1. Envías una batería de 20 consultas típicas de tus clientes a través de la API.
+2. El Gateway corre estas consultas con su motor.
+3. Se compara si los IDs retornados coinciden con los esperados.
+4. Obtienes un porcentaje de efectividad. Si supera tu **umbral (threshold)** (por ej. `0.8` o 80%), el set es aprobado.
+
+## Activación segura
+
+Si el último resultado de evaluación ("run") supera el umbral y valida exitosamente los campos confidenciales (garantizando cero filtraciones de datos `sensitive`), la fuente pasa a estado `validated`.
+
+Solo en estado `validated` se te permitirá llamar al endpoint `POST /sources/:id/activate`, abriendo el acceso para los agentes MCP.

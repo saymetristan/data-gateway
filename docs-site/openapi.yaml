@@ -1,0 +1,153 @@
+openapi: 3.1.0
+info:
+  title: Data Gateway API
+  version: 1.0.0
+  description: API REST para administrar fuentes de datos, mappings y ejecutar consultas híbridas sin protocolo MCP.
+servers:
+  - url: https://data.whaapy.com
+    description: Production API
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key
+security:
+  - bearerAuth: []
+paths:
+  /tools:
+    get:
+      summary: Listar Tools (Manifest)
+      description: Devuelve el manifiesto de herramientas para las fuentes agent_ready. Requiere el scope `tools:read`.
+      operationId: listTools
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      type: object
+  /tools/{name}/invoke:
+    post:
+      summary: Invocar Herramienta
+      description: Ejecuta una herramienta compilada. Requiere el scope `tools:invoke`.
+      operationId: invokeTool
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                args:
+                  type: object
+      responses:
+        "200":
+          description: OK
+  /query:
+    post:
+      summary: Ejecutar Query Híbrido
+      description: Ejecuta una búsqueda semántica directamente a la base vectorial saltándose la capa MCP. Requiere el scope `query:execute`.
+      operationId: executeQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                limit:
+                  type: integer
+                  default: 10
+                entity:
+                  type: string
+                filters:
+                  type: object
+      responses:
+        "200":
+          description: OK
+  /sources:
+    post:
+      summary: Crear Fuente (Source)
+      description: Conecta un nuevo origen de datos (database_url, shopify, csv).
+      operationId: createSource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [database_url, shopify, csv]
+                name:
+                  type: string
+                config:
+                  type: object
+      responses:
+        "200":
+          description: OK
+  /sources/{id}/mapping:
+    post:
+      summary: Subir Mapping Semántico
+      operationId: uploadMapping
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document:
+                  type: object
+      responses:
+        "200":
+          description: OK
+  /sources/{id}/index:
+    post:
+      summary: Iniciar Indexación
+      description: Dispara la regeneración del índice léxico y vectorial basado en el mapping actual.
+      operationId: indexSource
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /sources/{id}/activate:
+    post:
+      summary: Activar Fuente
+      description: Marca la fuente como `agent_ready` si ya superó los evals.
+      operationId: activateSource
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK

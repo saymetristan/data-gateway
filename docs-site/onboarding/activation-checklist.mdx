@@ -1,0 +1,80 @@
+---
+title: "Checklist de Activación"
+description: "Cómo escribir evals y marcar tu fuente como agent_ready."
+---
+
+# Activación y Evals
+
+El último paso para que tu fuente aparezca en el MCP es pasar exitosamente una batería de Evaluaciones (Evals). 
+
+## 1. Crear el Evaluation Set
+
+Un set de evaluación agrupa varios casos de prueba y define la nota mínima para aprobar (`threshold`).
+
+```bash
+curl -X POST "https://data.whaapy.com/evals/sets" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Pruebas de Catálogo Core",
+    "sourceId": "{source_id}",
+    "threshold": 0.8
+  }'
+```
+
+Guarda el `set_id` devuelto. Un umbral de `0.8` requiere que el 80% de tus casos de prueba acierten.
+
+## 2. Definir Casos de Prueba (Cases)
+
+Agrega varios casos reales. La pregunta (`query`) es la cadena de texto, y `expectedExternalIds` son los identificadores de la base de origen que deben aparecer en los primeros resultados.
+
+```bash
+# Caso 1
+curl -X POST "https://data.whaapy.com/evals/sets/{set_id}/cases" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "¿tienen camiseta roja talla M?",
+    "expectedExternalIds": ["SKU-001", "SKU-002"]
+  }'
+
+# Caso 2: Probar reglas de no revelación de campos confidenciales (opcional)
+curl -X POST "https://data.whaapy.com/evals/sets/{set_id}/cases" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Busca la sudadera negra",
+    "expectedExternalIds": ["SKU-005"],
+    "mustNotContainFields": ["internal_margin", "supplier_cost"]
+  }'
+```
+
+Crea entre 10 y 20 casos para tener una red de seguridad razonable.
+
+## 3. Correr las Pruebas
+
+Inicia una "corrida" de pruebas (run).
+
+```bash
+curl -X POST "https://data.whaapy.com/evals/run" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "evalSetId": "{set_id}"
+  }'
+```
+
+Si el porcentaje final cumple o supera tu `threshold` y no hubo violaciones de campos sensibles, tu fuente avanzará automáticamente al estado `validated`.
+
+## 4. Activación Final
+
+Llama al endpoint final de activación. **Este endpoint fallará si el estado no es `validated`.**
+
+```bash
+curl -X POST "https://data.whaapy.com/sources/{source_id}/activate" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+¡Felicidades! La fuente se marca como **`agent_ready`**.
+
+Todas sus herramientas declaradas (`search_product`, etc.) ahora aparecerán cuando tu cliente MCP interrogue la lista de herramientas. Procede a la sección de [Integración MCP](/mcp/overview) para empezar a consultarla.

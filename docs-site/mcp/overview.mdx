@@ -1,0 +1,28 @@
+---
+title: "Visión General del MCP"
+description: "Cómo funciona el Model Context Protocol en el Data Gateway."
+---
+
+# MCP en el Data Gateway
+
+El **Model Context Protocol (MCP)** es un estándar abierto desarrollado por Anthropic para estandarizar la forma en la que los asistentes de IA interactúan con fuentes de datos externas.
+
+Tsuzuro Data Gateway es un servidor MCP "inteligente":
+En lugar de tener herramientas cableadas (hardcoded), el servidor lee dinámicamente tu Workspace y **compila** las herramientas basadas en las fuentes de datos que estén en estado `agent_ready`.
+
+## Arquitectura de Distribución
+
+Tienes tres opciones principales para conectar tus agentes al Data Gateway:
+
+1. **Hosteado por nosotros (Whaapy Hosted):** La opción más sencilla. Apuntas tu cliente MCP a nuestra URL productiva (`https://mcp.data.whaapy.com/mcp`).
+2. **Local (stdio):** Si estás desarrollando localmente o usas clientes como Cursor IDE o Claude Desktop, puedes usar nuestro paquete npm como binario de línea de comandos.
+3. **Self-hosted / Proxy:** Si tienes tu propia infraestructura de agentes, puedes levantar tu propia instancia del paquete `@whaapy/data-gateway-mcp` o extenderlo para inyectar herramientas propias además de las del catálogo.
+
+## ¿Qué herramientas se generan?
+
+Para cada entidad definida en tu archivo de mapeo, el servidor MCP generará herramientas como:
+
+- `search_product`: Permite al agente hacer búsquedas híbridas semánticas sobre productos, pasando texto de búsqueda y aplicando filtros opcionales.
+- `check_availability_product`: Permite al agente buscar directamente por identificador único sin depender de búsqueda semántica.
+
+En las siguientes páginas veremos cómo conectar cada tipo de cliente.

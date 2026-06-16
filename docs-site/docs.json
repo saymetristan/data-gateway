@@ -1,0 +1,69 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Data Gateway",
+  "logo": {
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
+  },
+  "favicon": "/favicon.png",
+  "colors": {
+    "primary": "#0D9373",
+    "light": "#16B38D",
+    "dark": "#07604B"
+  },
+  "api": {
+    "openapi": "openapi.yaml"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "introduction",
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Concepts",
+        "pages": [
+          "concepts/architecture",
+          "concepts/source-maturity",
+          "concepts/semantic-mapping",
+          "concepts/evals-quality-gate",
+          "concepts/tools-and-query",
+          "concepts/security"
+        ]
+      },
+      {
+        "group": "Onboarding",
+        "pages": [
+          "onboarding/overview",
+          "onboarding/database-url",
+          "onboarding/shopify",
+          "onboarding/csv",
+          "onboarding/mapping-guide",
+          "onboarding/activation-checklist"
+        ]
+      },
+      {
+        "group": "MCP & Integration",
+        "pages": [
+          "mcp/overview",
+          "mcp/whaapy",
+          "mcp/cursor-claude-desktop",
+          "mcp/streamable-http-self-host",
+          "mcp/extend-custom-tools",
+          "mcp/response-envelope",
+          "mcp/troubleshooting"
+        ]
+      },
+      {
+        "group": "API Reference",
+        "pages": [
+          "api-reference/authentication",
+          "api-reference/scopes"
+        ]
+      }
+    ]
+  }
+}

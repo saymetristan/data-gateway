@@ -1,0 +1,33 @@
+---
+title: "Autenticación"
+description: "Cómo autenticarse con la API del Data Gateway."
+---
+
+# Autenticación
+
+Todas las llamadas a la API REST pública y al servidor MCP protegido requieren un token de portador (Bearer Token).
+
+Nuestras claves de entorno de cliente para producción (Workspaces) comienzan con el prefijo `dgw_live_`.
+
+## Formato del Header
+
+Agrega el header `Authorization` a tus peticiones HTTP:
+
+```http
+Authorization: Bearer dgw_live_xxxxxxxxxxxxxxxxx
+```
+
+En cURL se vería así:
+
+```bash
+curl "https://data.whaapy.com/tools" \
+  -H "Authorization: Bearer dgw_live_tu_clave_de_acceso"
+```
+
+## Aislamiento Multi-Tenant (RLS)
+
+A diferencia de muchos otros sistemas donde pasas el `workspaceId` en la URL o en el cuerpo de la solicitud, en el Data Gateway la clave API determina intrínsecamente quién eres.
+
+Nuestro middleware inyecta tu ID internamente y la base de datos aplica políticas de seguridad por fila (Role-Level Security o RLS). Es físicamente imposible que un error de programación en tus peticiones filtre o cruce datos hacia el catálogo de otro cliente.
+
+Revisa la sección de [Scopes](/api-reference/scopes) para ver cómo acotar los permisos de una API Key específica.

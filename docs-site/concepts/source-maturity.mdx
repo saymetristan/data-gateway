@@ -1,0 +1,38 @@
+---
+title: "Madurez de Fuente"
+description: "Conoce el ciclo de vida de una fuente de datos antes de poder ser usada."
+---
+
+# Estado de Madurez de Fuente
+
+El Data Gateway aplica un principio de **"seguridad por defecto"**. Una fuente de datos recién conectada **NO** se expone automáticamente a los agentes de IA. Debe pasar por un ciclo de vida de madurez lineal y auditable.
+
+El flujo de estados (`maturityStatus`) de una fuente es el siguiente:
+
+```text
+connected → profiled → mapped → indexed → validated → agent_ready
+```
+
+### 1. `connected`
+La fuente se creó exitosamente y las credenciales se validaron (por ejemplo, confirmando que la base de datos es read-only). Todavía no se han extraído datos de perfilado.
+
+### 2. `profiled`
+El Data Gateway extrajo una muestra de datos y determinó los tipos de columna. Ahora puedes descargar el perfilado (desde `/sources/:id/profile`) y usarlo de base para escribir el mapeo semántico.
+
+### 3. `mapped`
+Se subió un JSON de mapeo válido que define entidades, campos (`searchable`, `filterable`), reglas y qué elementos son visibles. El esquema es semánticamente correcto, pero los datos aún no están indexados con el nuevo esquema.
+
+### 4. `indexed`
+El proceso de indexación finalizó. Los datos ya cuentan con una representación JSON formateada y se generaron los vectores (embeddings) para las búsquedas. **En este estado, puedes correr Evaluaciones**, pero la fuente aún no es visible en el MCP para agentes.
+
+### 5. `validated`
+La fuente superó un conjunto de Evals (pruebas) con resultados satisfactorios. Es decir, tus casos de prueba reales encontraron los IDs que debían encontrar. Tienes la certeza de que el motor híbrido funciona como esperas para tu negocio.
+
+### 6. `agent_ready`
+Llamaste de forma manual al endpoint de activación (`POST /sources/:id/activate`). A partir de este momento, las herramientas MCP correspondientes a esta fuente (`search_X`, `check_availability_X`) se listarán y podrán ser invocadas por cualquier agente.
+
+---
+
+<Note>
+Si modificas el Mapeo o reindexas una fuente que estaba en `agent_ready`, el estado de madurez regresará temporalmente a `indexed` o `mapped`. Será necesario correr de nuevo las evaluaciones y activarla para prevenir roturas en producción.
+</Note>

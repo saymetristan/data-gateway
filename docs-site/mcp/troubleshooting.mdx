@@ -1,0 +1,34 @@
+---
+title: "Troubleshooting MCP"
+description: "Resolución de problemas frecuentes al usar el MCP."
+---
+
+# Troubleshooting MCP
+
+Si tu cliente MCP no funciona como esperas, revisa esta lista de casos comunes y sus soluciones.
+
+## Las herramientas no aparecen (`tools/list` vacío)
+
+Si configuras el servidor MCP, este se conecta, pero no lista ninguna herramienta (`search_*`):
+
+1. **Estado de Madurez de la fuente:** Ve a la consola o a la API y asegúrate de que la fuente superó los Evals y que llamaste a `POST /sources/:id/activate`. Las fuentes en estado `indexed` o `validated` no generan herramientas. Solo las que están en `agent_ready`.
+2. **Falta de Entidades en el Mapping:** Verifica que tu archivo `mapping.json` contenga la sección `entities` y que al menos una de ellas no tenga `exposeAsTool: false`.
+3. **Clave API Inválida:** Revisa que estás usando la clave de Workspace correcta (`dgw_live_...`), y que tiene permisos (`scopes`) de `tools:read`.
+
+## Errores HTTP 401 / 403
+
+- **En stdio:** Revisa que tu archivo de configuración en Cursor o Claude Desktop realmente inyecte `GATEWAY_API_KEY` en el entorno, sin comillas adicionales.
+- **En HTTP/Whaapy:** Asegúrate de que configuraste el tipo de autenticación en "Bearer" y el token sin prefijo "Bearer" en la casilla correspondiente (Whaapy se lo agrega en el header automáticamente).
+
+## El agente se queda pensando mucho tiempo ("queued")
+
+El protocolo Whaapy requiere que las operaciones lentas sean abortadas si superan un límite o devuelvan un estado `queued`.
+Si tu búsqueda está demorando mucho:
+- Es posible que la API central esté bajo mucha carga. Revisa la página de estado de los servicios.
+- Verifica si incluiste demasiados filtros complicados o si estás solicitando el procesamiento vectorial (`useLlmFallback: true`) para una cantidad masiva de datos en un índice que apenas está creándose.
+
+## Respuestas extrañas de errores HTTP desde Whaapy
+
+Si estás haciendo Self-Host:
+- **Version Mismatch:** Asegúrate de que el paquete de Whaapy MCP respeta el header `MCP-Protocol-Version: 2025-06-18`.
+- **CORS / Network:** Si tu proxy propio bloquea respuestas "chunked" o SSE, Whaapy no podrá parsear los mensajes del MCP y considerará la conexión rota. Utiliza proxies sin compresión abrupta ni terminación anticipada de streaming.

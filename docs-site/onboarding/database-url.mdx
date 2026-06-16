@@ -1,0 +1,62 @@
+---
+title: "Onboarding: Base de Datos SQL"
+description: "Cómo conectar una base de datos PostgreSQL."
+---
+
+# Conexión a Base de Datos
+
+Esta es la forma más común de conectar sistemas personalizados. El Gateway se conectará a tu base de datos periódicamente para sincronizar los registros.
+
+## 1. Crear usuario de solo lectura
+
+Antes de nada, debes crear un usuario en tu base de datos de producción que tenga **única y exclusivamente** permisos de lectura (`SELECT`).
+
+Si usas PostgreSQL, el script luce así:
+
+```sql
+CREATE USER data_gateway_ro WITH PASSWORD 'tu_password_seguro';
+GRANT CONNECT ON DATABASE catalog TO data_gateway_ro;
+GRANT USAGE ON SCHEMA public TO data_gateway_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO data_gateway_ro;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO data_gateway_ro;
+```
+
+## 2. Crear la fuente en el Data Gateway
+
+Usa tu API Key para crear la fuente. La API validará inmediatamente que el usuario no tiene permisos de escritura.
+
+```bash
+export WORKSPACE_KEY="dgw_live_tu_api_key_aqui"
+
+curl -X POST "https://data.whaapy.com/sources" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "database_url",
+    "name": "Catálogo de Productos",
+    "config": {
+      "connectionUrl": "postgresql://data_gateway_ro:tu_password_seguro@tu-host.com:5432/catalog",
+      "tables": ["products", "variants", "categories"]
+    }
+  }'
+```
+
+*Nota: La cadena de conexión (`connectionUrl`) se cifra inmediatamente en el backend y nunca se devuelve en respuestas de lectura.*
+
+## 3. Sincronización Manual y Perfilado
+
+Aunque la creación de la fuente encola una sincronización inicial, puedes dispararla a mano:
+
+```bash
+curl -X POST "https://data.whaapy.com/sources/{source_id}/sync" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+Una vez terminado (los jobs ocurren en background), descarga el perfil para entender qué detectó el Gateway:
+
+```bash
+curl "https://data.whaapy.com/sources/{source_id}/profile" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+Este perfil incluye todas tus columnas y los tipos inferidos, listos para que redactes tu [Mapeo Semántico](/onboarding/mapping-guide).

@@ -1,0 +1,90 @@
+---
+title: "Guía de Mapeo"
+description: "Escribiendo y aplicando tu archivo de mapping."
+---
+
+# Guía de Mapeo Semántico
+
+Una vez que tu fuente de datos está conectada y perfilada, tienes que decirle al Data Gateway qué columnas exponer y bajo qué reglas.
+
+## 1. Estructura del Documento
+
+Prepara un archivo `mapping.json`. [Revisa los Conceptos de Mapeo](/concepts/semantic-mapping) si necesitas entender la teoría.
+
+```json
+{
+  "document": {
+    "entities": [
+      {
+        "entity": "product",
+        "displayName": "Producto",
+        "pluralLabel": "Productos",
+        "sourceTable": "products",
+        "embeddingTextTemplate": "{{title}} - {{description}}. Color: {{color}}",
+        "fields": [
+          {
+            "name": "id",
+            "sourceColumn": "sku",
+            "type": "string",
+            "identifier": true
+          },
+          {
+            "name": "title",
+            "sourceColumn": "name",
+            "type": "string",
+            "searchable": true
+          },
+          {
+            "name": "price",
+            "sourceColumn": "cost",
+            "type": "number",
+            "filterable": true
+          },
+          {
+            "name": "stock",
+            "sourceColumn": "qty",
+            "type": "number",
+            "visible": true
+          }
+        ],
+        "defaultFilters": [
+          { "field": "stock", "op": "gt", "value": 0 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+En este ejemplo:
+- Creamos la entidad `product`. En el MCP se creará la herramienta `search_product`.
+- `title` es `searchable`: Si el agente busca "camisa azul", esta columna será fundamental.
+- `price` es `filterable`: El agente podrá pasar un parámetro explícito si el usuario le pide "camisas por menos de $100".
+- `stock` es `visible` pero no buscable.
+- `defaultFilters`: Se asegura de que el agente nunca verá productos con inventario cero.
+
+## 2. Aplicar el Mapping
+
+Con tu archivo listo, envíalo al endpoint de la fuente:
+
+```bash
+curl -X POST "https://data.whaapy.com/sources/{source_id}/mapping" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d @mapping.json
+```
+
+La fuente pasará al estado `mapped`.
+
+## 3. Indexar los datos
+
+Para que el mapeo tome efecto, debemos pedirle al Gateway que regenere el índice de búsqueda y calcule los vectores de embeddings utilizando la regla que indicaste en `embeddingTextTemplate`.
+
+```bash
+curl -X POST "https://data.whaapy.com/sources/{source_id}/index" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+Dependiendo de la cantidad de registros, este proceso puede tomar algunos segundos o minutos. Cuando termine, el estado de tu fuente será `indexed`.
+
+El siguiente paso es someter tu índice a pruebas mediante el [Checklist de Activación](/onboarding/activation-checklist).

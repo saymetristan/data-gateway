@@ -4,10 +4,12 @@
 
 Crea dos monitores HTTP(s) con intervalo **5 min** y alerta por email:
 
-| Nombre | URL | OK si |
-| --- | --- | --- |
-| data-gateway-api | `https://data.whaapy.com/health` | HTTP 200 y JSON `db: "connected"` |
-| data-gateway-mcp | `https://mcp.data.whaapy.com/health` | HTTP 200 y JSON `ok: true` |
+
+| Nombre           | URL                                  | OK si                             |
+| ---------------- | ------------------------------------ | --------------------------------- |
+| data-gateway-api | `https://data.whaapy.com/health`     | HTTP 200 y JSON `db: "connected"` |
+| data-gateway-mcp | `https://mcp.data.whaapy.com/health` | HTTP 200 y JSON `ok: true`        |
+
 
 Configuración sugerida UptimeRobot:
 

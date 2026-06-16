@@ -1,0 +1,33 @@
+---
+title: "Conectar en Whaapy"
+description: "Uso del MCP hosteado directamente en la plataforma Whaapy."
+---
+
+# Conectar en Whaapy
+
+Si estás utilizando **Whaapy** como orquestador de agentes, integrar tu catálogo del Data Gateway es tan simple como configurar un nuevo servidor MCP en tu dashboard.
+
+## Parámetros de Configuración
+
+En el dashboard de Whaapy, navega a la sección de configuración de MCPs y añade uno nuevo con estos datos:
+
+| Campo | Valor |
+| --- | --- |
+| **URL del Endpoint** | `https://mcp.data.whaapy.com/mcp` |
+| **Transporte** | Streamable HTTP (SSE / HTTP stream) |
+| **Tipo de Autenticación** | `Bearer` |
+| **Token / Clave** | Tu API Key de Workspace (ej. `dgw_live_...`) |
+| **Protocol Version** | `2025-06-18` |
+
+### ¿Qué ocurre al guardar?
+Whaapy enviará el mensaje `initialize` y posteriormente consultará la lista de herramientas (`tools/list`). Verás que las herramientas como `search_product` aparecen automáticamente en la interfaz.
+
+## Configuración en el Subagente de Whaapy
+
+Una vez que las herramientas están importadas, debes asignarlas a un Subagente o Herramienta.
+En la descripción de Whaapy para la herramienta, te sugerimos utilizar reglas semánticas claras, como:
+
+- **When to use:** "Usa esta herramienta cuando el usuario pregunte por el inventario, catálogo o precios."
+- **Fallback:** "Si el estado devuelto es `needs_more_info`, pide al usuario más contexto."
+
+Todos los formatos devueltos por este endpoint están 100% validados para ser compatibles con las restricciones del orquestador de Whaapy (como el uso de envelopes en JSON plano en el campo de texto).

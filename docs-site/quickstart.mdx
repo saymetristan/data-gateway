@@ -1,0 +1,44 @@
+---
+title: "Quickstart"
+description: "Paso a paso para integrar y consultar tu primera fuente."
+---
+
+# Quickstart
+
+Esta guía te muestra el flujo más corto desde que obtienes tu **API Key de Workspace** hasta que una fuente de datos está lista para ser consumida como herramienta MCP por agentes de Inteligencia Artificial.
+
+<Steps>
+  <Step title="Autentícate en tu Workspace">
+    Necesitas tu **API Key de Workspace** (suele empezar con `dgw_live_...`). Esta clave se utiliza tanto para llamadas a la API REST como para autenticarse con el servidor MCP.
+    
+    Guarda esta clave en un lugar seguro (por ejemplo, tu administrador de contraseñas o variables de entorno).
+  </Step>
+
+  <Step title="Conecta tu fuente de datos">
+    Elige el conector adecuado para tus datos y conéctalo usando la API:
+    - [Base de datos (PostgreSQL)](/onboarding/database-url)
+    - [Shopify](/onboarding/shopify)
+    - [Archivo CSV](/onboarding/csv)
+    
+    *Importante: Si usas conexión a base de datos, proporciona credenciales estrictamente de solo lectura (read-only).*
+  </Step>
+
+  <Step title="Define el mapeo semántico">
+    Configura tu [Mapeo Semántico](/concepts/semantic-mapping). Aquí defines qué campos se pueden buscar, cuáles se pueden filtrar, y cuáles son sensibles y deben ocultarse.
+    
+    Una vez definido, el Data Gateway indexará tu fuente (generando representaciones vectoriales para búsquedas híbridas).
+  </Step>
+
+  <Step title="Valida mediante Evaluaciones (Evals)">
+    Agrega casos de uso reales y evalúa que el Gateway devuelve los registros esperados para consultas comunes de tu negocio. Una fuente debe pasar estas evaluaciones para alcanzar el estado de `validated`. 
+    Lee más sobre [Evals como Compuerta de Calidad](/concepts/evals-quality-gate).
+  </Step>
+
+  <Step title="Activa la fuente y usa el MCP">
+    Llama al endpoint `/activate` de la fuente para marcarla como `agent_ready`. A partir de este momento, sus datos se exponen como herramientas MCP (ej. `search_catalog`, `check_availability_catalog`).
+    
+    Puedes probar la integración de forma local o usarla directamente con [Whaapy](/mcp/whaapy).
+  </Step>
+</Steps>
+
+¡Listo! Para entender los detalles de la infraestructura, revisa la sección de [Conceptos](/concepts/architecture).

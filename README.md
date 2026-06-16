@@ -2,6 +2,8 @@
 
 Capa de infraestructura que convierte fuentes de negocio (database URL, Shopify, CSV) en tools consultables por agentes de IA con búsqueda híbrida determinística, evals como gate y manifest MCP.
 
+> **Documentación Pública:** La documentación para integración de clientes, incluyendo tutoriales, referencia API y guías detalladas para el MCP se encuentra en el [Sitio de Docs (Mintlify)](docs-site/).
+
 ## Arquitectura
 
 ```mermaid
@@ -40,7 +42,7 @@ Madurez de fuente: `connected → profiled → mapped → indexed → validated 
 - MCP Whaapy-compatible: `https://mcp.data.whaapy.com/mcp` (Railway fallback: `https://mcp-production-91e6.up.railway.app/mcp`)
 - Railway proyecto `data-gateway`: servicios `api` (healthcheck `/health`), `worker` (sin dominio) y `mcp` (healthcheck `/health`, build con `@whaapy/data-gateway-mcp`)
 - Monitoreo mínimo: UptimeRobot (o similar) sobre `https://data.whaapy.com/health` y `https://mcp.data.whaapy.com/health` cada 5 min
-- Onboarding clientes: ver [docs/CLIENT_ONBOARDING.md](docs/CLIENT_ONBOARDING.md) y `scripts/onboard-client.sh`
+- Onboarding clientes: ver el [sitio de documentación](docs-site/) y el runbook interno [docs/CLIENT_ONBOARDING.md](docs/CLIENT_ONBOARDING.md)
 - DB: Supabase `data-ingest` vía session pooler (`aws-1-us-east-1.pooler.supabase.com:5432`; pg-boss requiere session mode)
 - Deploy manual: `railway up --service api|worker` desde la raíz; migraciones SIEMPRE vía MCP `data-gateway-supabase` (nunca `db:migrate` contra prod)
 
@@ -52,7 +54,7 @@ En Whaapy, agrega un MCP con:
 - Auth: bearer token = API key de workspace (`tools:read` + `tools:invoke`)
 - Protocolo: Streamable HTTP (`MCP-Protocol-Version: 2025-06-18`)
 
-El server traduce `tools/list` a `GET /tools` y `tools/call` a `POST /tools/:name/invoke`. Paquete npm: `@whaapy/data-gateway-mcp`. Los clientes que necesiten combinar tools propias pueden extender el paquete; ver `packages/mcp-server/README.md`.
+El server traduce `tools/list` a `GET /tools` y `tools/call` a `POST /tools/:name/invoke`. Paquete npm: `@whaapy/data-gateway-mcp`. Los clientes que necesiten combinar tools propias pueden extender el paquete; ver la [guía de extensión MCP en los docs](docs-site/mcp/extend-custom-tools.mdx).
 
 ## Local development
 
@@ -264,7 +266,7 @@ Fixture: `fixtures/ecommerce-evals.json` (24 cases para el catálogo de prueba).
 
 ## Shopify (Fase 5)
 
-Custom app token (no OAuth público). Scopes: `read_products`, `read_inventory`.
+Apps nuevas de Shopify usan client credentials grant; fuentes legacy con `accessToken` siguen soportadas. Scopes: `read_products`, `read_inventory`.
 
 ```bash
 # Crear fuente Shopify
@@ -275,7 +277,8 @@ curl -X POST http://localhost:3000/sources \
     "name": "Mi tienda",
     "config": {
       "shopDomain": "mi-tienda.myshopify.com",
-      "accessToken": "shpat_...",
+      "clientId": "...",
+      "clientSecret": "...",
       "webhookSecret": "whsec_..."
     }
   }'
@@ -286,6 +289,7 @@ curl -X POST http://localhost:3000/sources/{source_id}/sync \
 ```
 
 - Sync inicial automático al crear (full sync → profile)
+- El Gateway intercambia `clientId/clientSecret` por token Admin API de corta vida en runtime; no persiste tokens derivados
 - Webhooks en `POST /webhooks/shopify` (HMAC con `webhookSecret`; requiere `PUBLIC_API_URL` para registro automático)
 - Variantes indexadas como entidad `variant` (`fixtures/shopify-mapping.json`)
 - `available = status active AND inventoryQuantity > 0` vía rules `conditions[]`

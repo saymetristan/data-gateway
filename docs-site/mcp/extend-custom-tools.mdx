@@ -1,0 +1,93 @@
+---
+title: "Extender con Tools Propias"
+description: "Construye tu propio servidor MCP que incluye las tools del Gateway y las tuyas."
+---
+
+# Extender con Herramientas Propias
+
+En muchos casos de uso empresariales, los datos de catálogo/inventario que soluciona el Data Gateway son solo una pieza del rompecabezas. Puede que tu agente también necesite herramientas que interactúen con tu ERP privado, calculen comisiones o envíen emails.
+
+En lugar de registrar dos servidores MCP por separado en tu orquestador, puedes importar el código del Data Gateway como una librería en tu proyecto Node.js, e inyectar en el mismo servidor las herramientas adicionales.
+
+## Paquete Oficial
+
+Debes instalar `@whaapy/data-gateway-mcp` en tu proyecto Node.js (`>=22`).
+
+```bash
+npm install @whaapy/data-gateway-mcp
+npm install @modelcontextprotocol/sdk zod
+```
+
+## Ejemplo en TypeScript
+
+En este ejemplo inicializaremos el cliente contra la API de Data Gateway, levantaremos el servidor con las herramientas dinámicas generadas a partir de tus `mappings`, y por último agregaremos manualmente una herramienta nueva llamada `my_custom_tool`.
+
+```typescript
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+// Ojo: Importación profunda para acceder a las clases base
+import { GatewayClient } from '@whaapy/data-gateway-mcp/dist/client.js';
+import { createGatewayMcpServer } from '@whaapy/data-gateway-mcp/dist/server.js';
+
+async function main() {
+  // 1. Inicializamos el cliente hacia el Data Gateway
+  const client = new GatewayClient({
+    gatewayUrl: 'https://data.whaapy.com',
+    apiKey: 'dgw_live_tu_api_key_aqui',
+  });
+
+  // 2. Esta función asíncrona hace un `GET /tools` y registra automáticamente
+  //    todas las herramientas (search_product, etc) en una nueva instancia de McpServer.
+  const server = await createGatewayMcpServer(client);
+
+  // 3. Registramos nuestra herramienta propia
+  server.registerTool(
+    'my_custom_tool',
+    {
+      description:
+        'Tool adicional del cliente. When to use: cuando el agente necesite calcular la comisión de ventas.',
+      inputSchema: {
+        amount: z.number().describe('El monto total de la venta'),
+      },
+    },
+    async ({ amount }) => {
+      // Tu lógica de negocio privada
+      const commission = amount * 0.15;
+
+      // Para asegurar la compatibilidad con los orquestadores (como Whaapy),
+      // es una buena práctica devolver el mismo Envelope de respuesta.
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              ok: true,
+              status: 'success',
+              data: { commission, currency: "USD" },
+              toolName: 'my_custom_tool',
+              safety: 'read_only',
+            }),
+          },
+        ],
+      };
+    }
+  );
+
+  // 4. Levantamos el servidor en stdio (para Claude Desktop / Cursor)
+  // Opcional: podrías usar SSEServerTransport para exponerlo HTTP.
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  
+  console.error('Servidor Custom MCP iniciado en stdio');
+}
+
+main().catch((err) => {
+  console.error("Fatal error", err);
+  process.exit(1);
+});
+```
+
+## Aislamiento de Herramientas
+
+Cuando registres herramientas propias, asegúrate de no sobreescribir los nombres dinámicos de las herramientas del Data Gateway. Evita prefijos como `search_` y `check_availability_` en tus funciones personalizadas.

@@ -1,0 +1,36 @@
+---
+title: "Tools y Consultas"
+description: "Diferencia entre llamar al motor de búsqueda directamente y consumirlo vía MCP."
+---
+
+# Tools y Consultas Directas
+
+El Data Gateway proporciona dos formas distintas de acceder a tus datos integrados, cada una enfocada a una audiencia distinta.
+
+## 1. Integración vía Protocolo MCP (Tools)
+
+Ésta es la interfaz recomendada si vas a usar un Agente de IA, asistentes conversacionales, Whaapy, o editores inteligentes como Cursor y Claude Desktop.
+
+- **Cómo funciona:** El Gateway compila los esquemas de mapeo de las fuentes que estén en estado `agent_ready` y crea herramientas (`tools`) que los agentes entienden.
+- **Herramientas generadas:**
+  - `search_<entidad>`: Búsqueda híbrida. Recibe argumentos como `query` (búsqueda natural) y parámetros opcionales de filtrado basados en las columnas con `filterable: true`.
+  - `check_availability_<entidad>`: Permite recuperar un registro de manera exacta si el agente ya conoce su ID / identificador.
+- **Formato:** Sigue la especificación del Model Context Protocol. El agente recibe un esquema JSON y sabe qué variables puede mandar.
+- **Ventaja:** Cero configuración en el agente. Le conectas el servidor MCP y el agente descubre las bases de datos al vuelo, sin tener que darle instrucciones detalladas sobre las tablas subyacentes.
+
+## 2. API REST Directa (`POST /query`)
+
+Si estás desarrollando una aplicación de software, un panel administrativo interno o un portal e-commerce personalizado que no usa agentes (o donde controlas estrictamente el flujo del agente), puedes saltarte la capa MCP y hacer consultas HTTP directas.
+
+- **Cómo funciona:** Llamas al endpoint de la API central (`https://data.whaapy.com/query`).
+- **Formato:** Pasas el texto y los filtros explícitos, y la API devuelve los registros exactos.
+- **Parámetros:**
+  - `query`: El texto libre de búsqueda.
+  - `limit`: La cantidad máxima de resultados.
+  - `filters`: Objeto JSON con operadores y valores para filtrar (ej. `{ "price": { "lt": 100 } }`).
+- **Confidence Scoring:** La respuesta devuelve un objeto JSON claro indicando los campos exactos, los filtros aplicados por el sistema híbrido, y un puntaje de "Confianza" determinístico (sin LLM) que indica qué tan preciso parece el resultado.
+
+### ¿Cuándo usar cada una?
+
+- Usa **Tools (MCP)** cuando hables con un LLM o utilices un framework de agentes que soporte Model Context Protocol. Es la forma más fácil de "darle herramientas a un cerebro".
+- Usa **API Directa** cuando estés escribiendo código de frontend o backend convencional que necesita buscar en tu propio catálogo, o cuando tienes tu propio motor orquestador de AI y solo quieres usar el Gateway como motor de búsqueda optimizado.

@@ -1,0 +1,44 @@
+---
+title: "Self-host HTTP Multi-tenant"
+description: "Hostea tu propio nodo de MCP que hable con el Data Gateway."
+---
+
+# Self-host HTTP (Streamable HTTP)
+
+Si estás construyendo una plataforma multi-tenant o deseas integrar el Data Gateway en tu propia infraestructura de red, puedes ejecutar el servidor MCP en modo HTTP/SSE.
+
+## Ejecución Básica
+
+```bash
+npm i -g @whaapy/data-gateway-mcp
+
+# Para un solo tenant (single-tenant):
+GATEWAY_URL=https://data.whaapy.com \
+GATEWAY_API_KEY=dgw_live_tu_key \
+PORT=3100 \
+node $(npm root -g)/@whaapy/data-gateway-mcp/dist/http.js
+```
+
+El servidor estará escuchando en `http://0.0.0.0:3100/mcp`.
+
+## Modo Multi-Tenant
+
+El servidor MCP está diseñado para soportar entornos multi-usuario de manera segura.
+Si omites la variable `GATEWAY_API_KEY` al arrancar el servidor HTTP, este correrá en modo multi-tenant.
+
+```bash
+GATEWAY_URL=https://data.whaapy.com \
+PORT=3100 \
+node $(npm root -g)/@whaapy/data-gateway-mcp/dist/http.js
+```
+
+### ¿Cómo funciona el multi-tenant?
+
+En modo multi-tenant, el servidor MCP no utiliza una credencial global. En su lugar, el servidor asume que el cliente MCP inyectará la credencial del tenant en cada petición HTTP.
+
+1. El cliente envía la solicitud inicial con los encabezados:
+   `Authorization: Bearer dgw_live_tenant_key`
+2. El servidor MCP reenvía esa misma credencial a la API REST del Data Gateway (la cual utiliza la clave para asegurar el Role-Level Security y aislar los datos).
+3. Todas las subsiguientes interacciones de MCP en esa misma conexión SSE se mantendrán aisladas bajo los permisos de `dgw_live_tenant_key`.
+
+Esto te permite levantar un único pod/contenedor de `@whaapy/data-gateway-mcp` que sirva a cientos de clientes MCP distintos simultáneamente, cada uno con su propio catálogo y sus propias herramientas, garantizando aislamiento total en la API subyacente.

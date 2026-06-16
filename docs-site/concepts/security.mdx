@@ -1,0 +1,36 @@
+---
+title: "Seguridad y Privacidad"
+description: "Cómo manejamos las credenciales y la seguridad de los datos expuestos a la IA."
+---
+
+# Seguridad y Privacidad
+
+Conectar tu base de datos central a un agente de Inteligencia Artificial presenta retos de seguridad obvios. El Data Gateway está construido con defensas de "profundidad" en mente.
+
+## 1. Conexiones de Solo Lectura
+
+Cuando añades una base de datos mediante URL (`database_url`), **la API del Data Gateway valida de forma estricta** que la conexión tenga privilegios de solo lectura (Read-Only). 
+
+Si otorgas una cadena de conexión con permisos de `INSERT`, `UPDATE` o `DELETE`, la fuente será **rechazada** automáticamente en el momento de crearla. El Gateway no necesita permisos para modificar tus tablas de negocio; él se encarga exclusivamente de sincronizar y consultar.
+
+## 2. Cifrado en Reposo
+
+Toda cadena de conexión o secreto de API (ej. Shopify Client Secrets) proporcionado al Data Gateway es **cifrado de inmediato en la base de datos interna** utilizando claves de cifrado simétrico robustas. Nunca almacenamos credenciales de origen en texto plano.
+
+## 3. Sandboxing de Consultas y No-SQL-Generation
+
+La mayoría de integraciones ingenuas de bases de datos con LLMs les permiten a los agentes "escribir SQL" (Text-to-SQL). Esto es propenso a ataques de "Prompt Injection" o simples alucinaciones que rompen las bases de datos.
+
+En nuestro caso, **el LLM nunca genera SQL.**
+Las herramientas expuestas (MCP Tools) solo reciben un texto para buscar y parámetros JSON tipados. Es nuestro backend el que toma esos argumentos y orquesta la consulta de forma determinística en nuestro propio índice.
+
+## 4. Filtrado de Datos Sensibles en Origen
+
+La capa de Mapeo Semántico es el garante final de la exposición. Si configuras un campo con la propiedad `sensitive: true`:
+- El motor de indexación puede almacenarlo de forma segura (si es que necesita estar ahí), pero el campo **será removido** forzosamente antes de ser serializado y entregado al agente o al cliente.
+- Un campo sensible tiene prohibido estructuralmente ser utilizable para búsquedas o filtros, impidiendo ataques donde el agente trate de "adivinar" valores ocultos mediante búsqueda (enumeración).
+
+## 5. Tenancy de Claves API
+
+Cada Workspace recibe una clave de API única (`dgw_live_...`).
+Estas claves están ligadas mediante Role-Level Security (RLS) en la capa de la base de datos interna. Si tu solicitud HTTP contiene tu clave de Workspace, es **físicamente imposible** que los queries interaccionen o vean fuentes de datos o registros indexados que pertenezcan a otros usuarios o clientes.
