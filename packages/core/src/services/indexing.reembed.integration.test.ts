@@ -117,4 +117,79 @@ describe.runIf(hasDatabase)('indexing re-embed integration', () => {
       expect(embeddings.length).toBeGreaterThan(0);
     });
   });
+
+  it('purges stale mapping-version embeddings after writing active embeddings', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Mapping Reembed', slug: `mapping-reembed-${Date.now()}`, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      const [source] = await db
+        .insert(sources)
+        .values({
+          workspaceId: workspace.id,
+          type: 'csv',
+          name: 'Mapping Reembed Source',
+          config: {},
+          maturityStatus: 'mapped',
+        })
+        .returning();
+      if (!source) throw new Error('source missing');
+
+      await db.insert(mappings).values({
+        sourceId: source.id,
+        version: 1,
+        document: mappingDocument,
+        status: 'active',
+      });
+
+      await db.insert(sourceRecordsRaw).values({
+        sourceId: source.id,
+        sourceRecordId: 'csv:1',
+        payload: { sku: 'SKU-1' },
+        payloadHash: 'hash-1',
+      });
+
+      const provider = new MockEmbeddingProvider(1024);
+      await indexSource(db, source.id, workspace.id, testUrl, new MockLlmProvider(), {
+        embeddingModel: provider.model,
+      });
+
+      const [record] = await db
+        .select({ id: records.id })
+        .from(records)
+        .where(eq(records.sourceId, source.id));
+      if (!record) throw new Error('record missing');
+
+      await generateEmbeddingsForRecords(db, source.id, [record.id], 1, provider);
+
+      await db
+        .update(mappings)
+        .set({ status: 'inactive' })
+        .where(and(eq(mappings.sourceId, source.id), eq(mappings.version, 1)));
+
+      await db.insert(mappings).values({
+        sourceId: source.id,
+        version: 2,
+        document: mappingDocument,
+        status: 'active',
+      });
+
+      await indexSource(db, source.id, workspace.id, testUrl, new MockLlmProvider(), {
+        embeddingModel: provider.model,
+      });
+      await generateEmbeddingsForRecords(db, source.id, [record.id], 2, provider);
+
+      const embeddings = await db
+        .select({
+          mappingVersion: recordEmbeddings.mappingVersion,
+        })
+        .from(recordEmbeddings)
+        .where(eq(recordEmbeddings.recordId, record.id));
+
+      expect(embeddings).toEqual([{ mappingVersion: 2 }]);
+    });
+  });
 });

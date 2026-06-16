@@ -478,6 +478,13 @@ export async function generateEmbeddingsForRecords(
     written += 1;
   }
 
+  await purgeOldEmbeddingsForSource(
+    db,
+    sourceId,
+    mappingVersion,
+    embeddingProvider.model,
+  );
+
   return written;
 }
 
