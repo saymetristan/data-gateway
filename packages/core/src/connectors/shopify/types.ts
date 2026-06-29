@@ -5,6 +5,18 @@ export type ShopifyCollection = {
   updatedAt: string;
 };
 
+export type ShopifyMetafield = {
+  namespace: string;
+  key: string;
+  value: string;
+  type: string;
+};
+
+export type ShopifySelectedOption = {
+  name: string;
+  value: string;
+};
+
 export type ShopifyVariant = {
   id: string;
   productId: string;
@@ -14,8 +26,12 @@ export type ShopifyVariant = {
   price: number;
   compareAtPrice: number | null;
   inventoryQuantity: number;
+  availableForSale: boolean | null;
   size: string | null;
   color: string | null;
+  selectedOptions: ShopifySelectedOption[];
+  imageUrl: string | null;
+  metafields: ShopifyMetafield[];
   unitCost: number | null;
   updatedAt: string;
 };
@@ -23,9 +39,16 @@ export type ShopifyVariant = {
 export type ShopifyProduct = {
   id: string;
   title: string;
+  handle: string;
+  onlineStoreUrl: string | null;
+  productUrl: string | null;
+  productType: string;
+  featuredImageUrl: string | null;
+  imageUrl: string | null;
   status: 'active' | 'draft' | 'archived';
   vendor: string;
   tags: string;
+  metafields: ShopifyMetafield[];
   updatedAt: string;
   collectionIds: string[];
   collectionTitles: string[];
@@ -52,7 +75,9 @@ export interface ShopifyClient {
 
 export type ShopifySourceConfig = {
   shopDomain: string;
-  accessToken: string;
+  accessToken?: string;
+  clientId?: string;
+  clientSecret?: string;
   webhookSecret?: string;
   apiVersion?: string;
   syncState?: {

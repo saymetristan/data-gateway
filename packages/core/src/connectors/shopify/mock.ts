@@ -17,7 +17,11 @@ const COLLECTIONS = [
 const PRODUCT_COUNT = 60;
 const PAGE_SIZE = 25;
 
-function buildVariant(productId: number, variantIndex: number, product: ShopifyProduct): ShopifyVariant {
+function buildVariant(
+  productId: number,
+  variantIndex: number,
+  product: ShopifyProduct,
+): ShopifyVariant {
   const sku = `SHOP-SKU-${String(productId).padStart(4, '0')}-${String(variantIndex + 1)}`;
   const color = COLORS[(productId + variantIndex) % COLORS.length] ?? 'rojo';
   const size = SIZES[variantIndex % SIZES.length] ?? 'M';
@@ -33,8 +37,23 @@ function buildVariant(productId: number, variantIndex: number, product: ShopifyP
     price: Number.parseFloat(price),
     compareAtPrice: null,
     inventoryQuantity,
+    availableForSale: statusIsAvailable(product.status, inventoryQuantity),
     size,
     color,
+    selectedOptions: [
+      { name: 'Talla', value: size },
+      { name: 'Color', value: color },
+      { name: 'Ancho', value: variantIndex % 2 === 0 ? '1.50 m' : '1.40 m' },
+    ],
+    imageUrl: `https://cdn.shopify.com/mock/products/${String(productId)}-${String(variantIndex + 1)}.jpg`,
+    metafields: [
+      {
+        namespace: 'custom',
+        key: 'composition',
+        value: productId % 2 === 0 ? '100% algodón' : '70% lino, 30% algodón',
+        type: 'single_line_text_field',
+      },
+    ],
     unitCost: Number((Number(price) * 0.45).toFixed(2)),
     updatedAt: product.updatedAt,
   };
@@ -49,9 +68,29 @@ function buildProduct(productId: number): ShopifyProduct {
   const product: ShopifyProduct = {
     id: String(productId),
     title: `Producto Shopify ${String(productId)}`,
+    handle: `producto-shopify-${String(productId)}`,
+    onlineStoreUrl: `https://mock-shop.myshopify.com/products/producto-shopify-${String(productId)}`,
+    productUrl: `https://mock-shop.myshopify.com/products/producto-shopify-${String(productId)}`,
+    productType: productId % 2 === 0 ? 'gabardina' : 'lino',
+    featuredImageUrl: `https://cdn.shopify.com/mock/products/${String(productId)}.jpg`,
+    imageUrl: `https://cdn.shopify.com/mock/products/${String(productId)}.jpg`,
     status,
     vendor: 'MockVendor',
-    tags: `tag-${String(productId % 5)},categoria-${String(productId % 3)}`,
+    tags: `tag-${String(productId % 5)},categoria-${String(productId % 3)},estilo:casual`,
+    metafields: [
+      {
+        namespace: 'custom',
+        key: 'fabric_type',
+        value: productId % 2 === 0 ? 'gabardina' : 'lino',
+        type: 'single_line_text_field',
+      },
+      {
+        namespace: 'custom',
+        key: 'style',
+        value: productId % 3 === 0 ? 'formal' : 'casual',
+        type: 'single_line_text_field',
+      },
+    ],
     updatedAt,
     collectionIds: [collection.id],
     collectionTitles: [collection.title],
@@ -78,7 +117,9 @@ const CATALOG = buildCatalog();
 
 export class MockShopifyClient implements ShopifyClient {
   private products = new Map(CATALOG.products.map((product) => [product.id, product]));
-  private collections = new Map(CATALOG.collections.map((collection) => [collection.id, collection]));
+  private collections = new Map(
+    CATALOG.collections.map((collection) => [collection.id, collection]),
+  );
 
   async validateConnection(): Promise<{ ok: boolean; shopName?: string; message?: string }> {
     await Promise.resolve();
@@ -105,7 +146,9 @@ export class MockShopifyClient implements ShopifyClient {
     };
   }
 
-  async fetchCollections(options?: { cursor?: string }): Promise<PaginatedResult<ShopifyCollection>> {
+  async fetchCollections(options?: {
+    cursor?: string;
+  }): Promise<PaginatedResult<ShopifyCollection>> {
     await Promise.resolve();
     const items = [...this.collections.values()];
     const offset = options?.cursor ? Number(options.cursor) : 0;
@@ -159,4 +202,8 @@ export class MockShopifyClient implements ShopifyClient {
 
 export function createMockShopifyClient(): MockShopifyClient {
   return new MockShopifyClient();
+}
+
+function statusIsAvailable(status: ShopifyProduct['status'], inventoryQuantity: number): boolean {
+  return status === 'active' && inventoryQuantity > 0;
 }

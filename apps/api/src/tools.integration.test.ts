@@ -45,11 +45,7 @@ function isValidToolSchema(schema: Record<string, unknown>): boolean {
   );
 }
 
-async function bootstrapAgentReadyShopify(
-  db: Database,
-  testUrl: string,
-  workspaceId: string,
-) {
+async function bootstrapAgentReadyShopify(db: Database, testUrl: string, workspaceId: string) {
   const encryptedConfig = encryptSourceConfig(
     'shopify',
     {
@@ -73,15 +69,9 @@ async function bootstrapAgentReadyShopify(
   if (!source) throw new Error('source missing');
 
   const client = createMockShopifyClient();
-  await syncShopifySource(
-    db,
-    source.id,
-    workspaceId,
-    ENCRYPTION_KEY,
-    testUrl,
-    client,
-    { fullSync: true },
-  );
+  await syncShopifySource(db, source.id, workspaceId, ENCRYPTION_KEY, testUrl, client, {
+    fullSync: true,
+  });
   await profileSource(db, source.id);
   const mapping = await createSourceMapping(db, source.id, workspaceId, {
     document: loadShopifyMappingFixture(),
@@ -146,7 +136,11 @@ describe.runIf(hasDatabase)('tools API integration', () => {
 
     const encryptedConfig = encryptSourceConfig(
       'shopify',
-      { shopDomain: 'indexed-only.myshopify.com', accessToken: 'shpat_x', webhookSecret: 'whsec_x' },
+      {
+        shopDomain: 'indexed-only.myshopify.com',
+        accessToken: 'shpat_x',
+        webhookSecret: 'whsec_x',
+      },
       ENCRYPTION_KEY,
     );
     await db.insert(sources).values({
@@ -256,12 +250,11 @@ describe.runIf(hasDatabase)('tools API integration', () => {
     expect(body.kind).toBe('search');
     expect(body.results.length).toBeGreaterThan(0);
     expect(body.results.every((row) => !('cost' in row.data))).toBe(true);
-    expect(body.applied_filters.some((filter) => filter.field === 'available')).toBe(true);
+    expect(body.results[0]?.data.productUrl).toBeTruthy();
+    expect(body.results[0]?.data.imageUrl).toBeTruthy();
+    expect(body.applied_filters.some((filter) => filter.field === 'available')).toBe(false);
 
-    const logs = await db
-      .select()
-      .from(queryLogs)
-      .where(eq(queryLogs.workspaceId, workspace.id));
+    const logs = await db.select().from(queryLogs).where(eq(queryLogs.workspaceId, workspace.id));
     const toolLog = logs.find((log) => {
       const structured = log.structuredQuery as Record<string, unknown> | null;
       return structured?.toolName === 'search_variant';

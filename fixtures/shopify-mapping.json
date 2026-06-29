@@ -5,16 +5,190 @@
       "description": "Variantes de producto Shopify con precio, inventario y atributos",
       "sourceTable": "variants",
       "fields": [
-        { "name": "sku", "sourceColumn": "sku", "type": "string", "description": "SKU de la variante", "searchable": true, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "title", "sourceColumn": "title", "type": "string", "description": "Título de la variante", "searchable": true, "filterable": false, "visible": true, "sensitive": false },
-        { "name": "productTitle", "sourceColumn": "productTitle", "type": "string", "description": "Título del producto padre", "searchable": true, "filterable": false, "visible": true, "sensitive": false },
-        { "name": "price", "sourceColumn": "price", "type": "number", "description": "Precio de venta", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "inventoryQuantity", "sourceColumn": "inventoryQuantity", "type": "number", "description": "Cantidad en inventario", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "size", "sourceColumn": "size", "type": "string", "description": "Talla", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "color", "sourceColumn": "color", "type": "string", "description": "Color", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "collections", "sourceColumn": "collections", "type": "string", "description": "Colecciones del producto", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "status", "sourceColumn": "status", "type": "string", "description": "Estado del producto en Shopify", "searchable": false, "filterable": true, "visible": true, "sensitive": false },
-        { "name": "cost", "sourceColumn": "unitCost", "type": "number", "searchable": false, "filterable": false, "visible": true, "sensitive": true }
+        {
+          "name": "sku",
+          "sourceColumn": "sku",
+          "type": "string",
+          "description": "SKU de la variante",
+          "searchable": true,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "title",
+          "sourceColumn": "title",
+          "type": "string",
+          "description": "Título de la variante",
+          "searchable": true,
+          "filterable": false,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "productTitle",
+          "sourceColumn": "productTitle",
+          "type": "string",
+          "description": "Título del producto padre",
+          "searchable": true,
+          "filterable": false,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "price",
+          "sourceColumn": "price",
+          "type": "number",
+          "description": "Precio de venta",
+          "searchable": false,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "inventoryQuantity",
+          "sourceColumn": "inventoryQuantity",
+          "type": "number",
+          "description": "Cantidad en inventario",
+          "searchable": false,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "available",
+          "sourceColumn": "available",
+          "type": "boolean",
+          "description": "Disponibilidad derivada por estado activo y stock mayor a cero",
+          "searchable": false,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false,
+          "aliases": ["disponible", "en stock", "agotado", "sin stock"]
+        },
+        {
+          "name": "size",
+          "sourceColumn": "size",
+          "type": "string",
+          "description": "Talla",
+          "searchable": false,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "color",
+          "sourceColumn": "color",
+          "type": "string",
+          "description": "Color",
+          "searchable": false,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "width",
+          "sourceColumn": "width",
+          "type": "string",
+          "description": "Ancho de la variante o tela",
+          "searchable": false,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false,
+          "aliases": ["ancho", "anchura"]
+        },
+        {
+          "name": "composition",
+          "sourceColumn": "composition",
+          "type": "string",
+          "description": "Composición del material",
+          "searchable": true,
+          "filterable": false,
+          "visible": true,
+          "sensitive": false,
+          "aliases": ["composición", "composicion", "material"]
+        },
+        {
+          "name": "fabricType",
+          "sourceColumn": "fabricType",
+          "type": "string",
+          "description": "Tipo de tela",
+          "searchable": true,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false,
+          "aliases": ["tipo de tela", "tela", "fabric"]
+        },
+        {
+          "name": "style",
+          "sourceColumn": "style",
+          "type": "string",
+          "description": "Estilo del producto",
+          "searchable": true,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false,
+          "aliases": ["estilo"]
+        },
+        {
+          "name": "productType",
+          "sourceColumn": "productType",
+          "type": "string",
+          "description": "Tipo de producto Shopify",
+          "searchable": true,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "productUrl",
+          "sourceColumn": "productUrl",
+          "type": "string",
+          "description": "URL pública del producto",
+          "searchable": false,
+          "filterable": false,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "imageUrl",
+          "sourceColumn": "imageUrl",
+          "type": "string",
+          "description": "Imagen principal de la variante o producto",
+          "searchable": false,
+          "filterable": false,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "collections",
+          "sourceColumn": "collections",
+          "type": "string",
+          "description": "Colecciones del producto",
+          "searchable": false,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "status",
+          "sourceColumn": "status",
+          "type": "string",
+          "description": "Estado del producto en Shopify",
+          "searchable": false,
+          "filterable": true,
+          "visible": true,
+          "sensitive": false
+        },
+        {
+          "name": "cost",
+          "sourceColumn": "unitCost",
+          "type": "number",
+          "searchable": false,
+          "filterable": false,
+          "visible": true,
+          "sensitive": true
+        }
       ],
       "rules": [
         {
@@ -25,8 +199,8 @@
           ]
         }
       ],
-      "defaultFilters": [{ "field": "available", "op": "eq", "value": true }],
-      "embeddingTextTemplate": "{{productTitle}} {{title}} {{sku}} {{color}} {{size}} {{collections}}"
+      "defaultFilters": [],
+      "embeddingTextTemplate": "{{productTitle}} {{title}} {{sku}} {{color}} {{size}} {{collections}} {{composition}} {{fabricType}} {{style}} {{productType}}"
     }
   ]
 }

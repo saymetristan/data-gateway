@@ -25,11 +25,9 @@ import { withTestDatabase } from './test/db-helper.js';
 import { loadShopifyMappingFixture } from './test/shopify-mapping.js';
 import { seedShopifyEvalSet } from './test/shopify-evals.js';
 
-const hasDatabase =
-  process.env.RUN_INTEGRATION_TESTS === 'true' || process.env.CI === 'true';
+const hasDatabase = process.env.RUN_INTEGRATION_TESTS === 'true' || process.env.CI === 'true';
 const ENCRYPTION_KEY =
-  process.env.CREDENTIALS_ENCRYPTION_KEY ??
-  Buffer.alloc(32, 7).toString('base64');
+  process.env.CREDENTIALS_ENCRYPTION_KEY ?? Buffer.alloc(32, 7).toString('base64');
 
 async function bootstrapShopifySource(
   db: Parameters<Parameters<typeof withTestDatabase>[0]>[0],
@@ -60,15 +58,9 @@ async function bootstrapShopifySource(
   if (!source) throw new Error('source missing');
 
   const client = createMockShopifyClient();
-  await syncShopifySource(
-    db,
-    source.id,
-    workspaceId,
-    ENCRYPTION_KEY,
-    testUrl,
-    client,
-    { fullSync: true },
-  );
+  await syncShopifySource(db, source.id, workspaceId, ENCRYPTION_KEY, testUrl, client, {
+    fullSync: true,
+  });
   await profileSource(db, source.id);
   const mapping = await createSourceMapping(db, source.id, workspaceId, {
     document: loadShopifyMappingFixture(),
@@ -92,7 +84,11 @@ describe.runIf(hasDatabase)('shopify integration', () => {
     await withTestDatabase(async (db, testUrl) => {
       const [workspace] = await db
         .insert(workspaces)
-        .values({ name: 'Shopify', slug: `shopify-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
+        .values({
+          name: 'Shopify',
+          slug: `shopify-${crypto.randomUUID().slice(0, 8)}`,
+          settings: {},
+        })
         .returning();
       if (!workspace) throw new Error('workspace missing');
 
@@ -118,11 +114,45 @@ describe.runIf(hasDatabase)('shopify integration', () => {
     });
   });
 
+  it('search_variant devuelve variantes agotadas cuando no se filtra disponibilidad', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({
+          name: 'Shopify Stock',
+          slug: `shopify-stock-${crypto.randomUUID().slice(0, 8)}`,
+          settings: {},
+        })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      const { source } = await bootstrapShopifySource(db, testUrl, workspace.id);
+      const response = await executeQuery({
+        db,
+        workspaceId: workspace.id,
+        request: { query: 'SHOP-SKU-0006-3', limit: 5, useLlmFallback: false, sourceId: source.id },
+        embeddingProvider: new MockEmbeddingProvider(1024),
+      });
+
+      expect(response.applied_filters.some((filter) => filter.field === 'available')).toBe(false);
+      expect(response.results.some((result) => result.data.sku === 'SHOP-SKU-0006-3')).toBe(true);
+      const soldOut = response.results.find((result) => result.data.sku === 'SHOP-SKU-0006-3');
+      expect(soldOut?.data.available).toBe(false);
+      expect(soldOut?.data.inventoryQuantity).toBe(0);
+      expect(soldOut?.data.productUrl).toBeTruthy();
+      expect(soldOut?.data.imageUrl).toBeTruthy();
+    });
+  });
+
   it('sync incremental no reescribe raw sin cambios', async () => {
     await withTestDatabase(async (db, testUrl) => {
       const [workspace] = await db
         .insert(workspaces)
-        .values({ name: 'Incremental', slug: `inc-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
+        .values({
+          name: 'Incremental',
+          slug: `inc-${crypto.randomUUID().slice(0, 8)}`,
+          settings: {},
+        })
         .returning();
       if (!workspace) throw new Error('workspace missing');
 
@@ -133,15 +163,9 @@ describe.runIf(hasDatabase)('shopify integration', () => {
         .where(eq(sourceRecordsRaw.sourceId, source.id));
 
       const client = createMockShopifyClient();
-      await syncShopifySource(
-        db,
-        source.id,
-        workspace.id,
-        ENCRYPTION_KEY,
-        testUrl,
-        client,
-        { fullSync: false },
-      );
+      await syncShopifySource(db, source.id, workspace.id, ENCRYPTION_KEY, testUrl, client, {
+        fullSync: false,
+      });
 
       const after = await db
         .select()
@@ -181,11 +205,7 @@ describe.runIf(hasDatabase)('shopify integration', () => {
         payload: { id: 1 },
       });
 
-      const [updated] = await db
-        .select()
-        .from(sources)
-        .where(eq(sources.id, source.id))
-        .limit(1);
+      const [updated] = await db.select().from(sources).where(eq(sources.id, source.id)).limit(1);
       expect(updated?.maturityStatus).toBe('agent_ready');
     });
   });
@@ -226,7 +246,11 @@ describe.runIf(hasDatabase)('shopify integration', () => {
     await withTestDatabase(async (db, testUrl) => {
       const [workspace] = await db
         .insert(workspaces)
-        .values({ name: 'Variant Delete', slug: `var-del-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
+        .values({
+          name: 'Variant Delete',
+          slug: `var-del-${crypto.randomUUID().slice(0, 8)}`,
+          settings: {},
+        })
         .returning();
       if (!workspace) throw new Error('workspace missing');
 
