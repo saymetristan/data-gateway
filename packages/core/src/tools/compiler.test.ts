@@ -50,6 +50,19 @@ const variantEntity: MappingEntity = {
       sensitive: false,
     },
     {
+      name: 'composition',
+      sourceColumn: 'composition',
+      type: 'string',
+      label: 'Composición',
+      filterLabel: 'composición',
+      aliases: ['material'],
+      identifier: false,
+      searchable: true,
+      filterable: true,
+      visible: true,
+      sensitive: false,
+    },
+    {
       name: 'cost',
       sourceColumn: 'unitCost',
       type: 'number',
@@ -115,6 +128,17 @@ const profile: SourceProfileDocument = {
             { value: 'negro', count: 3 },
           ],
         },
+        {
+          name: 'composition',
+          inferredType: 'string',
+          cardinality: 2,
+          nullCount: 0,
+          nullRate: 0,
+          topValues: [
+            { value: '100% algodón', count: 5 },
+            { value: '70% lino, 30% algodón', count: 5 },
+          ],
+        },
       ],
     },
   ],
@@ -148,6 +172,8 @@ describe('tool compiler', () => {
     expect(properties.price_max?.maximum).toBe(500);
     expect(properties.price_min?.description).toContain('MXN');
     expect(properties.sku?.title).toBe('SKU');
+    expect(properties.composition?.enum).toEqual(['100% algodón', '70% lino, 30% algodón']);
+    expect(properties.composition?.description).toContain('Alias: material');
     expect(properties.available?.type).toBe('boolean');
     expect(properties.available?.description).toContain('Producto activo con inventario');
     expect(properties.cost).toBeUndefined();
@@ -166,7 +192,10 @@ describe('tool compiler', () => {
     expect(availability?.description).toContain('When to use:');
     expect(availability?.description).toContain('Never use for:');
     expect(availability?.inputSchema.required).toEqual(['sku']);
-    const properties = availability?.inputSchema.properties as Record<string, Record<string, unknown>>;
+    const properties = availability?.inputSchema.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
     expect(properties.sku?.title).toBe('SKU');
   });
 
@@ -230,7 +259,12 @@ describe('tool compiler', () => {
           ...profile.tables[0]!,
           columns: profile.tables[0]!.columns.map((column) =>
             column.name === 'color'
-              ? { ...column, cardinality: 25, suggestedValues: values, topValues: values.slice(0, 20) }
+              ? {
+                  ...column,
+                  cardinality: 25,
+                  suggestedValues: values,
+                  topValues: values.slice(0, 20),
+                }
               : column,
           ),
         },

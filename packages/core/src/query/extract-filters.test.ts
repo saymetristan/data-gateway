@@ -7,13 +7,71 @@ const baseEntity: MappingEntity = {
   entity: 'product',
   sourceTable: 'products',
   fields: [
-    { name: 'price', sourceColumn: 'price', type: 'number', label: 'Precio', aliases: ['costo'], filterable: true, searchable: false, visible: true, sensitive: false },
-    { name: 'stock', sourceColumn: 'stock', type: 'number', filterable: true, searchable: false, visible: true, sensitive: false },
-    { name: 'color', sourceColumn: 'color', type: 'string', filterable: true, searchable: false, visible: true, sensitive: false },
-    { name: 'size', sourceColumn: 'size', type: 'string', filterable: true, searchable: false, visible: true, sensitive: false },
-    { name: 'category', sourceColumn: 'category', type: 'string', filterable: true, searchable: false, visible: true, sensitive: false },
-    { name: 'available', sourceColumn: 'available', type: 'boolean', filterable: true, searchable: false, visible: true, sensitive: false },
-    { name: 'name', sourceColumn: 'name', type: 'string', filterable: false, searchable: true, visible: true, sensitive: false },
+    {
+      name: 'price',
+      sourceColumn: 'price',
+      type: 'number',
+      label: 'Precio',
+      aliases: ['costo'],
+      filterable: true,
+      searchable: false,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'stock',
+      sourceColumn: 'stock',
+      type: 'number',
+      filterable: true,
+      searchable: false,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'color',
+      sourceColumn: 'color',
+      type: 'string',
+      filterable: true,
+      searchable: false,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'size',
+      sourceColumn: 'size',
+      type: 'string',
+      filterable: true,
+      searchable: false,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'category',
+      sourceColumn: 'category',
+      type: 'string',
+      filterable: true,
+      searchable: false,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'available',
+      sourceColumn: 'available',
+      type: 'boolean',
+      filterable: true,
+      searchable: false,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'name',
+      sourceColumn: 'name',
+      type: 'string',
+      filterable: false,
+      searchable: true,
+      visible: true,
+      sensitive: false,
+    },
   ],
   rules: [],
   defaultFilters: [],
@@ -65,8 +123,150 @@ const profile: SourceProfileDocument = {
   ],
 };
 
+const shopifyEntity: MappingEntity = {
+  entity: 'variant',
+  sourceTable: 'variants',
+  fields: [
+    {
+      name: 'width',
+      sourceColumn: 'width',
+      type: 'string',
+      aliases: ['ancho', 'anchura'],
+      filterable: true,
+      searchable: true,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'composition',
+      sourceColumn: 'composition',
+      type: 'string',
+      aliases: ['composición', 'composicion', 'material'],
+      filterable: true,
+      searchable: true,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'fabricType',
+      sourceColumn: 'fabricType',
+      type: 'string',
+      aliases: ['tipo de tela', 'tela'],
+      filterable: true,
+      searchable: true,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'style',
+      sourceColumn: 'style',
+      type: 'string',
+      aliases: ['estilo'],
+      filterable: true,
+      searchable: true,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'productType',
+      sourceColumn: 'productType',
+      type: 'string',
+      aliases: ['tipo de producto'],
+      filterable: true,
+      searchable: true,
+      visible: true,
+      sensitive: false,
+    },
+    {
+      name: 'available',
+      sourceColumn: 'available',
+      type: 'boolean',
+      aliases: ['disponible', 'en stock', 'agotado', 'sin stock'],
+      filterable: true,
+      searchable: false,
+      visible: true,
+      sensitive: false,
+    },
+  ],
+  rules: [],
+  defaultFilters: [],
+  embeddingTextTemplate: '{{width}} {{composition}} {{fabricType}} {{style}} {{productType}}',
+};
+
+const shopifyProfile: SourceProfileDocument = {
+  totalRecords: 20,
+  profiledAt: new Date().toISOString(),
+  tables: [
+    {
+      table: 'variants',
+      recordCount: 20,
+      columns: [
+        {
+          name: 'width',
+          inferredType: 'string',
+          cardinality: 2,
+          nullCount: 0,
+          nullRate: 0,
+          topValues: [
+            { value: '1.50 m', count: 10 },
+            { value: '1.40 m', count: 10 },
+          ],
+        },
+        {
+          name: 'composition',
+          inferredType: 'string',
+          cardinality: 2,
+          nullCount: 0,
+          nullRate: 0,
+          topValues: [
+            { value: '100% algodón', count: 10 },
+            { value: '70% lino, 30% algodón', count: 10 },
+          ],
+        },
+        {
+          name: 'fabricType',
+          inferredType: 'string',
+          cardinality: 2,
+          nullCount: 0,
+          nullRate: 0,
+          topValues: [
+            { value: 'lino', count: 10 },
+            { value: 'gabardina', count: 10 },
+          ],
+        },
+        {
+          name: 'style',
+          inferredType: 'string',
+          cardinality: 2,
+          nullCount: 0,
+          nullRate: 0,
+          topValues: [
+            { value: 'formal', count: 10 },
+            { value: 'casual', count: 10 },
+          ],
+        },
+        {
+          name: 'productType',
+          inferredType: 'string',
+          cardinality: 2,
+          nullCount: 0,
+          nullRate: 0,
+          topValues: [
+            { value: 'lino', count: 10 },
+            { value: 'mezclilla', count: 10 },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 function run(query: string) {
   return extractFilters({ query, entity: baseEntity, profile });
+}
+
+function runShopify(query: string) {
+  return extractFilters({ query, entity: shopifyEntity, profile: shopifyProfile });
 }
 
 describe('extractFilters', () => {
@@ -139,8 +339,24 @@ describe('extractFilters', () => {
       ...baseEntity,
       fields: [
         ...baseEntity.fields.filter((field) => field.type !== 'number'),
-        { name: 'stock', sourceColumn: 'stock', type: 'number', filterable: true, searchable: false, visible: true, sensitive: false },
-        { name: 'units', sourceColumn: 'price', type: 'number', filterable: true, searchable: false, visible: true, sensitive: false },
+        {
+          name: 'stock',
+          sourceColumn: 'stock',
+          type: 'number',
+          filterable: true,
+          searchable: false,
+          visible: true,
+          sensitive: false,
+        },
+        {
+          name: 'units',
+          sourceColumn: 'price',
+          type: 'number',
+          filterable: true,
+          searchable: false,
+          visible: true,
+          sensitive: false,
+        },
       ],
     };
     const result = extractFilters({ query: 'menos de 100', entity: ambiguousEntity, profile });
@@ -209,5 +425,41 @@ describe('extractFilters', () => {
     });
 
     expect(result.filters).toContainEqual({ field: 'active_for_sale', op: 'eq', value: true });
+  });
+
+  it('extrae ancho como valor real desde alias + valor parcial', () => {
+    const result = runShopify('tela ancho 1.50');
+    expect(result.filters).toContainEqual({ field: 'width', op: 'eq', value: '1.50 m' });
+    expect(result.filters).not.toContainEqual({ field: 'width', op: 'eq', value: 'ancho' });
+  });
+
+  it('extrae tipo de tela como filtro real desde label + valor', () => {
+    const result = runShopify('busco tipo de tela lino');
+    expect(result.filters).toContainEqual({ field: 'fabricType', op: 'eq', value: 'lino' });
+    expect(result.filters.find((filter) => filter.field === 'productType')).toBeUndefined();
+  });
+
+  it('extrae estilo como filtro real desde alias + valor', () => {
+    const result = runShopify('quiero cortina estilo formal');
+    expect(result.filters).toContainEqual({ field: 'style', op: 'eq', value: 'formal' });
+  });
+
+  it('extrae composición usando un valor compatible del profile', () => {
+    const result = runShopify('composición algodón');
+    expect(result.filters).toContainEqual({
+      field: 'composition',
+      op: 'eq',
+      value: '100% algodón',
+    });
+  });
+
+  it('evita aplicar filtros ambiguos cuando un token matchea varios campos sin label', () => {
+    const result = runShopify('lino');
+    expect(result.filters.find((filter) => filter.field === 'fabricType')).toBeUndefined();
+    expect(result.filters.find((filter) => filter.field === 'productType')).toBeUndefined();
+    expect(result.warnings).toContainEqual(
+      'Ambiguous string filter "lino" matched multiple fields; leaving it as free text',
+    );
+    expect(result.unresolvedText).toBe('lino');
   });
 });

@@ -91,7 +91,7 @@
           "sourceColumn": "width",
           "type": "string",
           "description": "Ancho de la variante o tela",
-          "searchable": false,
+          "searchable": true,
           "filterable": true,
           "visible": true,
           "sensitive": false,
@@ -103,7 +103,7 @@
           "type": "string",
           "description": "Composición del material",
           "searchable": true,
-          "filterable": false,
+          "filterable": true,
           "visible": true,
           "sensitive": false,
           "aliases": ["composición", "composicion", "material"]
@@ -200,7 +200,7 @@
         }
       ],
       "defaultFilters": [],
-      "embeddingTextTemplate": "{{productTitle}} {{title}} {{sku}} {{color}} {{size}} {{collections}} {{composition}} {{fabricType}} {{style}} {{productType}}"
+      "embeddingTextTemplate": "{{productTitle}} {{title}} {{sku}} {{color}} {{size}} {{width}} {{collections}} {{composition}} {{fabricType}} {{style}} {{productType}}"
     }
   ]
 }

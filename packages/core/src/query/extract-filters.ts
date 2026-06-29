@@ -17,20 +17,9 @@ export type ExtractFiltersResult = {
   warnings: string[];
 };
 
-const BOOLEAN_TRUE_PHRASES = [
-  'disponible',
-  'en stock',
-  'in stock',
-  'available',
-  'hay stock',
-];
+const BOOLEAN_TRUE_PHRASES = ['disponible', 'en stock', 'in stock', 'available', 'hay stock'];
 
-const BOOLEAN_FALSE_PHRASES = [
-  'agotado',
-  'sin stock',
-  'no disponible',
-  'out of stock',
-];
+const BOOLEAN_FALSE_PHRASES = ['agotado', 'sin stock', 'no disponible', 'out of stock'];
 
 const PRICE_FIELD_HINTS = ['price', 'precio', 'cost', 'coste', 'costo', 'amount', 'monto'];
 
@@ -38,6 +27,14 @@ type NumericRangeMatch = {
   op: 'gt' | 'gte' | 'lt' | 'lte';
   value: number;
   span: { start: number; end: number };
+};
+
+type StringFilterMatch = {
+  field: string;
+  value: string;
+  span: { start: number; end: number };
+  explicit: boolean;
+  length: number;
 };
 
 export function extractFilters(input: ExtractFiltersInput): ExtractFiltersResult {
@@ -60,16 +57,13 @@ export function extractFilters(input: ExtractFiltersInput): ExtractFiltersResult
     }
   }
 
+  const stringMatches: StringFilterMatch[] = [];
   for (const field of filterableFields) {
     if (field.type === 'string') {
       const column = field.sourceColumn
         ? profileColumns.get(field.sourceColumn)
         : profileColumns.get(field.name);
-      const enumMatch = extractEnumFilter(input.query, field, column);
-      if (enumMatch) {
-        filters.push({ field: field.name, op: 'eq', value: enumMatch.value });
-        consumed.push(enumMatch.span);
-      }
+      stringMatches.push(...extractStringFilterMatches(input.query, field, column));
     }
 
     if (field.type === 'boolean') {
@@ -81,6 +75,12 @@ export function extractFilters(input: ExtractFiltersInput): ExtractFiltersResult
     }
   }
 
+  const selectedStringMatches = selectStringFilterMatches(stringMatches, warnings);
+  for (const match of selectedStringMatches) {
+    filters.push({ field: match.field, op: 'eq', value: match.value });
+    consumed.push(match.span);
+  }
+
   const unresolvedText = removeConsumedSpans(input.query, consumed);
   return { filters, unresolvedText, warnings };
 }
@@ -89,9 +89,7 @@ function extractNumericRanges(query: string): NumericRangeMatch[] {
   const matches: NumericRangeMatch[] = [];
   const normalized = normalizeText(query);
 
-  const between = normalized.match(
-    /\bentre\s+(\$?\d[\d.,]*)\s+y\s+(\$?\d[\d.,]*)\b/i,
-  );
+  const between = normalized.match(/\bentre\s+(\$?\d[\d.,]*)\s+y\s+(\$?\d[\d.,]*)\b/i);
   if (between?.[1] && between[2]) {
     const low = parseSpanishNumber(between[1]);
     const high = parseSpanishNumber(between[2]);
@@ -107,7 +105,10 @@ function extractNumericRanges(query: string): NumericRangeMatch[] {
 
   const patterns: Array<{ regex: RegExp; op: NumericRangeMatch['op'] }> = [
     { regex: /\b(?:menos de|menor que|por debajo de|under|below)\s+(\$?\d[\d.,]*)\b/gi, op: 'lt' },
-    { regex: /\b(?:mas de|más de|mayor que|por encima de|over|above)\s+(\$?\d[\d.,]*)\b/gi, op: 'gt' },
+    {
+      regex: /\b(?:mas de|más de|mayor que|por encima de|over|above)\s+(\$?\d[\d.,]*)\b/gi,
+      op: 'gt',
+    },
     { regex: /\b(?:maximo|máximo|hasta|up to|max)\s+(\$?\d[\d.,]*)\b/gi, op: 'lte' },
     { regex: /\b(?:minimo|mínimo|desde|from|min)\s+(\$?\d[\d.,]*)\b/gi, op: 'gte' },
   ];
@@ -134,13 +135,9 @@ function resolveNumericField(
 ): FilterableTarget | null {
   const hinted = candidates.filter((item) =>
     PRICE_FIELD_HINTS.some((hint) =>
-      [
-        item.name,
-        item.label,
-        item.filterLabel,
-        item.description ?? '',
-        ...item.aliases,
-      ].some((value) => value.toLowerCase().includes(hint)),
+      [item.name, item.label, item.filterLabel, item.description ?? '', ...item.aliases].some(
+        (value) => value.toLowerCase().includes(hint),
+      ),
     ),
   );
 
@@ -165,45 +162,232 @@ function resolveNumericField(
   return null;
 }
 
-function extractEnumFilter(
+function extractStringFilterMatches(
   query: string,
   field: FilterableTarget,
   column: ProfileColumn | undefined,
-): { value: string; span: { start: number; end: number } } | null {
+): StringFilterMatch[] {
   const values = column?.suggestedValues ?? column?.topValues ?? [];
-  if (values.length === 0 && field.aliases.length === 0) return null;
+  const stringValues = values
+    .map((item) => item.value)
+    .filter((value) => value !== null)
+    .map((value) => String(value));
 
+  const matches: StringFilterMatch[] = [];
   const normalizedQuery = normalizeText(query);
-  let best:
-    | { value: string; span: { start: number; end: number }; length: number }
-    | null = null;
+  const hintSpans = findFieldHintSpans(query, field);
 
-  for (const topValue of values) {
-    if (topValue.value === null) continue;
-    const token = normalizeText(String(topValue.value));
-    if (token.length < 1) continue;
+  for (const hintSpan of hintSpans) {
+    const explicit = extractExplicitStringMatch(query, hintSpan, field.name, stringValues);
+    if (explicit) matches.push(explicit);
+  }
 
-    const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, 'i');
-    const match = regex.exec(normalizedQuery);
-    if (!match) continue;
+  for (const value of stringValues) {
+    const valueMatch = findValueMatch(normalizedQuery, value);
+    if (!valueMatch) continue;
 
-    const span = findSpan(query, String(topValue.value));
-    if (!best || token.length > best.length) {
-      best = { value: String(topValue.value), span, length: token.length };
+    matches.push({
+      field: field.name,
+      value,
+      span: valueMatch.span,
+      explicit: false,
+      length: valueMatch.length,
+    });
+  }
+
+  return matches;
+}
+
+function extractExplicitStringMatch(
+  query: string,
+  hintSpan: { start: number; end: number },
+  field: string,
+  values: string[],
+): StringFilterMatch | null {
+  const tail = query.slice(hintSpan.end, Math.min(query.length, hintSpan.end + 80));
+  const normalizedTail = normalizeText(tail).replace(/^(?:\s|de|del|la|el|con|en|:|-)+/i, '');
+  if (!normalizedTail) return null;
+
+  let best: { value: string; valueSpan: { start: number; end: number }; length: number } | null =
+    null;
+
+  for (const value of values) {
+    const valueMatch = findValueMatch(normalizedTail, value);
+    if (valueMatch) {
+      const valueStart = hintSpan.end + valueMatch.span.start;
+      const candidate = {
+        value,
+        valueSpan: { start: valueStart, end: hintSpan.end + valueMatch.span.end },
+        length: valueMatch.length,
+      };
+      if (!best || candidate.length > best.length) best = candidate;
+      continue;
+    }
+
+    const partial = firstMeaningfulTailToken(normalizedTail);
+    const normalizedValue = normalizeText(value);
+    if (partial && normalizedValue.includes(partial)) {
+      const partialSpan = findNormalizedTokenSpan(normalizedTail, partial);
+      const valueStart = hintSpan.end + (partialSpan?.start ?? 0);
+      const candidate = {
+        value,
+        valueSpan: {
+          start: valueStart,
+          end: hintSpan.end + (partialSpan?.end ?? partial.length),
+        },
+        length: partial.length,
+      };
+      if (!best || candidate.length > best.length) best = candidate;
     }
   }
 
-  for (const alias of field.aliases) {
-    const token = normalizeText(alias);
-    const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, 'i');
-    const match = regex.exec(normalizedQuery);
-    if (!match) continue;
-    if (!best || token.length > best.length) {
-      best = { value: alias, span: findSpan(query, alias), length: token.length };
-    }
+  if (best) {
+    return {
+      field,
+      value: best.value,
+      span: {
+        start: Math.min(hintSpan.start, best.valueSpan.start),
+        end: Math.max(hintSpan.end, best.valueSpan.end),
+      },
+      explicit: true,
+      length: best.length,
+    };
   }
 
-  return best ? { value: best.value, span: best.span } : null;
+  if (values.length > 0) return null;
+
+  const rawValue = extractRawValueAfterHint(normalizedTail);
+  if (!rawValue) return null;
+  const rawSpan = findNormalizedTokenSpan(normalizedTail, rawValue) ?? {
+    start: 0,
+    end: rawValue.length,
+  };
+  return {
+    field,
+    value: rawValue,
+    span: { start: hintSpan.start, end: hintSpan.end + rawSpan.end },
+    explicit: true,
+    length: rawValue.length,
+  };
+}
+
+function selectStringFilterMatches(
+  matches: StringFilterMatch[],
+  warnings: string[],
+): StringFilterMatch[] {
+  const selected: StringFilterMatch[] = [];
+  const fields = new Set<string>();
+
+  const explicit = matches
+    .filter((match) => match.explicit)
+    .sort((left, right) => right.length - left.length);
+  for (const match of explicit) {
+    if (fields.has(match.field)) continue;
+    if (selected.some((item) => spansOverlap(item.span, match.span))) continue;
+    selected.push(match);
+    fields.add(match.field);
+  }
+
+  const implicit = matches.filter((match) => !match.explicit);
+  const groups = new Map<string, StringFilterMatch[]>();
+  for (const match of implicit) {
+    if (fields.has(match.field)) continue;
+    if (selected.some((item) => spansOverlap(item.span, match.span))) continue;
+    const key = `${String(match.span.start)}:${String(match.span.end)}:${normalizeText(match.value)}`;
+    groups.set(key, [...(groups.get(key) ?? []), match]);
+  }
+
+  for (const group of groups.values()) {
+    const first = group[0];
+    if (!first) continue;
+    const uniqueFields = new Set(group.map((match) => match.field));
+    if (uniqueFields.size > 1) {
+      warnings.push(
+        `Ambiguous string filter "${first.value}" matched multiple fields; leaving it as free text`,
+      );
+      continue;
+    }
+    const match = group.sort((left, right) => right.length - left.length)[0];
+    if (!match) continue;
+    selected.push(match);
+    fields.add(match.field);
+  }
+
+  return selected.sort((left, right) => left.span.start - right.span.start);
+}
+
+function findFieldHintSpans(
+  query: string,
+  field: FilterableTarget,
+): Array<{ start: number; end: number }> {
+  const hints = [field.filterLabel, field.label, field.name, ...field.aliases]
+    .filter(Boolean)
+    .map((hint) => normalizeText(hint))
+    .filter((hint) => hint.length > 1);
+  const uniqueHints = [...new Set(hints)].sort((left, right) => right.length - left.length);
+  const normalizedQuery = normalizeText(query);
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const hint of uniqueHints) {
+    const span = findNormalizedTokenSpan(normalizedQuery, hint);
+    if (!span) continue;
+    if (spans.some((item) => spansOverlap(item, span))) continue;
+    spans.push(span);
+  }
+  return spans;
+}
+
+function findValueMatch(
+  normalizedText: string,
+  value: string,
+): { span: { start: number; end: number }; length: number } | null {
+  const tokens = valueTokens(value);
+  for (const token of tokens) {
+    const span = findNormalizedTokenSpan(normalizedText, token);
+    if (span) return { span, length: token.length };
+  }
+  return null;
+}
+
+function valueTokens(value: string): string[] {
+  const full = normalizeText(value);
+  const tokens = [full];
+  const numeric = full.match(/^\d+(?:[.,]\d+)?/)?.[0];
+  if (numeric && numeric.length >= 2) tokens.push(numeric);
+  return [...new Set(tokens)]
+    .filter((token) => token.length > 0)
+    .sort((a, b) => b.length - a.length);
+}
+
+function firstMeaningfulTailToken(normalizedTail: string): string | null {
+  const tokens = normalizedTail.match(/[a-z0-9%.,]+/g) ?? [];
+  const ignored = new Set(['de', 'del', 'la', 'el', 'con', 'en', 'para', 'tipo']);
+  const meaningful = tokens.filter((token) => !ignored.has(token));
+  return meaningful.slice(0, 3).join(' ') || null;
+}
+
+function extractRawValueAfterHint(normalizedTail: string): string | null {
+  const match = normalizedTail.match(/[a-z0-9][a-z0-9%.,]*(?:\s+[a-z0-9%.,]+){0,2}/);
+  return match?.[0]?.trim() || null;
+}
+
+function findNormalizedTokenSpan(
+  text: string,
+  token: string,
+): { start: number; end: number } | null {
+  if (!token) return null;
+  const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, 'i');
+  const match = regex.exec(text);
+  if (!match) return null;
+  const prefixLength = match[1]?.length ?? 0;
+  const start = match.index + prefixLength;
+  return { start, end: start + token.length };
+}
+
+function spansOverlap(
+  left: { start: number; end: number },
+  right: { start: number; end: number },
+): boolean {
+  return left.start < right.end && right.start < left.end;
 }
 
 function extractBooleanFilter(
@@ -217,7 +401,9 @@ function extractBooleanFilter(
     field.filterLabel,
     field.description ?? '',
     ...field.aliases,
-  ].join(' ').toLowerCase();
+  ]
+    .join(' ')
+    .toLowerCase();
   const nameHint =
     hintText.includes('available') ||
     hintText.includes('disponible') ||
