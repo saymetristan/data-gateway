@@ -10,7 +10,9 @@ import type {
 } from './types.js';
 
 const DEFAULT_API_VERSION = '2025-10';
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 5;
+const MEDIA_PAGE_SIZE = 1;
+const METAFIELDS_PAGE_SIZE = 20;
 
 type GraphqlResponse<T> = {
   data?: T;
@@ -83,7 +85,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
               tags
               updatedAt
               featuredImage { url altText }
-              media(first: 5) {
+              media(first: ${String(MEDIA_PAGE_SIZE)}) {
                 edges {
                   node {
                     preview { image { url altText } }
@@ -91,7 +93,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
                   }
                 }
               }
-              metafields(first: 250) {
+              metafields(first: ${String(METAFIELDS_PAGE_SIZE)}) {
                 edges { node { namespace key value type } }
               }
               collections(first: 10) {
@@ -109,7 +111,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
                     availableForSale
                     updatedAt
                     selectedOptions { name value }
-                    media(first: 3) {
+                    media(first: ${String(MEDIA_PAGE_SIZE)}) {
                       edges {
                         node {
                           preview { image { url altText } }
@@ -117,7 +119,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
                         }
                       }
                     }
-                    metafields(first: 250) {
+                    metafields(first: ${String(METAFIELDS_PAGE_SIZE)}) {
                       edges { node { namespace key value type } }
                     }
                     inventoryItem { id unitCost { amount } }
@@ -193,7 +195,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
           tags
           updatedAt
           featuredImage { url altText }
-          media(first: 5) {
+          media(first: ${String(MEDIA_PAGE_SIZE)}) {
             edges {
               node {
                 preview { image { url altText } }
@@ -201,7 +203,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
               }
             }
           }
-          metafields(first: 250) {
+          metafields(first: ${String(METAFIELDS_PAGE_SIZE)}) {
             edges { node { namespace key value type } }
           }
           collections(first: 10) {
@@ -219,7 +221,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
                 availableForSale
                 updatedAt
                 selectedOptions { name value }
-                media(first: 3) {
+                media(first: ${String(MEDIA_PAGE_SIZE)}) {
                   edges {
                     node {
                       preview { image { url altText } }
@@ -227,7 +229,7 @@ export class ShopifyGraphqlClient implements ShopifyClient {
                     }
                   }
                 }
-                metafields(first: 250) {
+                metafields(first: ${String(METAFIELDS_PAGE_SIZE)}) {
                   edges { node { namespace key value type } }
                 }
                 inventoryItem { id unitCost { amount } }
