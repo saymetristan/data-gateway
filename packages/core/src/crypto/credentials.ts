@@ -9,7 +9,7 @@ export type SourceConfig = Record<string, unknown>;
 const SENSITIVE_FIELDS: Record<SourceType, string[]> = {
   database_url: ['connectionUrl'],
   csv: [],
-  shopify: ['accessToken', 'webhookSecret'],
+  shopify: ['accessToken', 'clientSecret', 'webhookSecret'],
 };
 
 export function parseEncryptionKey(base64Key: string): Buffer {

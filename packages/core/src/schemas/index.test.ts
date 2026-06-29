@@ -30,6 +30,31 @@ describe('schemas', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('validates Shopify source with client credentials', () => {
+    const parsed = createSourceSchema.safeParse({
+      type: 'shopify',
+      name: 'Shopify',
+      config: {
+        shopDomain: 'bayon.myshopify.com',
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+      },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects Shopify source without a complete auth method', () => {
+    const parsed = createSourceSchema.safeParse({
+      type: 'shopify',
+      name: 'Shopify',
+      config: {
+        shopDomain: 'bayon.myshopify.com',
+        clientId: 'client-id',
+      },
+    });
+    expect(parsed.success).toBe(false);
+  });
+
   it('rejects sensitive searchable or filterable mapping fields', () => {
     const parsed = createMappingSchema.safeParse({
       document: {

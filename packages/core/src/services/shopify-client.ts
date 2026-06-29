@@ -21,7 +21,9 @@ export async function createShopifyClientForSourceRecord(
   return createShopifyClientForSource(
     {
       shopDomain: String(config.shopDomain),
-      accessToken: String(config.accessToken),
+      ...(typeof config.accessToken === 'string' ? { accessToken: config.accessToken } : {}),
+      ...(typeof config.clientId === 'string' ? { clientId: config.clientId } : {}),
+      ...(typeof config.clientSecret === 'string' ? { clientSecret: config.clientSecret } : {}),
       ...(typeof config.apiVersion === 'string' ? { apiVersion: config.apiVersion } : {}),
     },
     useMockProviders,

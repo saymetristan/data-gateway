@@ -47,7 +47,9 @@ export async function createSourceWithValidation(
       ? createMockShopifyClient()
       : createShopifyClient({
           shopDomain: input.config.shopDomain,
-          accessToken: input.config.accessToken,
+          ...(input.config.accessToken ? { accessToken: input.config.accessToken } : {}),
+          ...(input.config.clientId ? { clientId: input.config.clientId } : {}),
+          ...(input.config.clientSecret ? { clientSecret: input.config.clientSecret } : {}),
           ...(input.config.apiVersion ? { apiVersion: input.config.apiVersion } : {}),
         });
     try {
@@ -105,7 +107,9 @@ export async function createSourceWithValidation(
       ) {
         const client = createShopifyClient({
           shopDomain: input.config.shopDomain,
-          accessToken: input.config.accessToken,
+          ...(input.config.accessToken ? { accessToken: input.config.accessToken } : {}),
+          ...(input.config.clientId ? { clientId: input.config.clientId } : {}),
+          ...(input.config.clientSecret ? { clientSecret: input.config.clientSecret } : {}),
           ...(input.config.apiVersion ? { apiVersion: input.config.apiVersion } : {}),
         });
         try {

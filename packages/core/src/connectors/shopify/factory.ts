@@ -5,7 +5,9 @@ import type { ShopifyClient } from './types.js';
 export function createShopifyClientForSource(
   config: {
     shopDomain: string;
-    accessToken: string;
+    accessToken?: string;
+    clientId?: string;
+    clientSecret?: string;
     apiVersion?: string;
   },
   useMockProviders = false,
@@ -16,7 +18,9 @@ export function createShopifyClientForSource(
 
   return createShopifyClient({
     shopDomain: config.shopDomain,
-    accessToken: config.accessToken,
+    ...(config.accessToken ? { accessToken: config.accessToken } : {}),
+    ...(config.clientId ? { clientId: config.clientId } : {}),
+    ...(config.clientSecret ? { clientSecret: config.clientSecret } : {}),
     ...(config.apiVersion ? { apiVersion: config.apiVersion } : {}),
   });
 }

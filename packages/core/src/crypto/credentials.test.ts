@@ -42,4 +42,25 @@ describe('credentials crypto', () => {
     const decrypted = decryptSourceConfig('database_url', encrypted, testKey);
     expect(decrypted.connectionUrl).toBe(config.connectionUrl);
   });
+
+  it('encrypts Shopify client credentials secrets', () => {
+    const encrypted = encryptSourceConfig(
+      'shopify',
+      {
+        shopDomain: 'bayon.myshopify.com',
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        webhookSecret: 'webhook-secret',
+      },
+      testKey,
+    );
+
+    expect(encrypted.clientId).toBe('client-id');
+    expect(String(encrypted.clientSecret).startsWith('enc:v1:')).toBe(true);
+    expect(String(encrypted.webhookSecret).startsWith('enc:v1:')).toBe(true);
+
+    const decrypted = decryptSourceConfig('shopify', encrypted, testKey);
+    expect(decrypted.clientSecret).toBe('client-secret');
+    expect(decrypted.webhookSecret).toBe('webhook-secret');
+  });
 });
