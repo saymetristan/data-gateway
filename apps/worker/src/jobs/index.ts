@@ -10,6 +10,10 @@ import {
   registerShopifyScheduledJobs,
   scheduleShopifySyncJobs,
 } from './shopify-scheduled.js';
+import {
+  registerQueryCacheJobs,
+  scheduleQueryCacheJobs,
+} from './query-cache.js';
 
 export function registerJobs(boss: PgBoss, env: WorkerEnv): void {
   registerHealthJobs(boss);
@@ -19,9 +23,11 @@ export function registerJobs(boss: PgBoss, env: WorkerEnv): void {
   registerEvalJobs(boss, env);
   registerShopifyWebhookJobs(boss, env);
   registerShopifyScheduledJobs(boss, env);
+  registerQueryCacheJobs(boss, env);
 }
 
 export async function scheduleJobs(boss: PgBoss): Promise<void> {
   await scheduleHealthJobs(boss);
   await scheduleShopifySyncJobs(boss);
+  await scheduleQueryCacheJobs(boss);
 }

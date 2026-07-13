@@ -19,6 +19,7 @@ export const queryLogs = pgTable(
     latencyMs: integer('latency_ms'),
     warnings: jsonb('warnings').default([]),
     error: text('error'),
+    metadata: jsonb('metadata').default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

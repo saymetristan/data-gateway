@@ -28,6 +28,7 @@ export const queryLogItemSchema = z.object({
   latencyMs: z.number().nullable(),
   warnings: z.array(z.string()).nullable(),
   error: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()).nullable(),
   createdAt: z.string(),
 });
 

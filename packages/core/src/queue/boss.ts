@@ -2,6 +2,10 @@ import PgBoss from 'pg-boss';
 
 let bossInstance: PgBoss | null = null;
 
+/** Keep completed jobs briefly, then drop archive rows aggressively (archive was 547MB). */
+const PGBOSS_ARCHIVE_COMPLETED_AFTER_SECONDS = 3_600;
+const PGBOSS_DELETE_AFTER_DAYS = 2;
+
 export async function getQueue(connectionString: string): Promise<PgBoss> {
   if (!bossInstance) {
     bossInstance = new PgBoss({
@@ -9,6 +13,8 @@ export async function getQueue(connectionString: string): Promise<PgBoss> {
       schema: 'pgboss',
       // Solo encola jobs desde la API; pool mínimo para no agotar el session pooler.
       max: 2,
+      archiveCompletedAfterSeconds: PGBOSS_ARCHIVE_COMPLETED_AFTER_SECONDS,
+      deleteAfterDays: PGBOSS_DELETE_AFTER_DAYS,
     });
     await bossInstance.start();
   }

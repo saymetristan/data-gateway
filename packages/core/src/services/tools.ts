@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
+import { withWorkspaceContext } from '../db/rls.js';
 import { sources, workspaces } from '../db/schema/index.js';
 import { GatewayError } from '../errors/gateway-error.js';
 import type { EmbeddingProvider } from '../providers/embeddings.js';
@@ -14,52 +15,54 @@ import { getSourceProfile } from './profile.js';
 import { executeQuery } from './query.js';
 
 export async function getToolManifest(db: Database, workspaceId: string): Promise<ToolManifest> {
-  const [workspace] = await db
-    .select({ id: workspaces.id, name: workspaces.name })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  if (!workspace) {
-    throw GatewayError.notFound('Workspace not found');
-  }
-
-  const rows = await db
-    .select()
-    .from(sources)
-    .where(and(eq(sources.workspaceId, workspaceId), eq(sources.maturityStatus, 'agent_ready')));
-
-  const compiled: ToolDefinition[] = [];
-  const warnings: string[] = [];
-  for (const source of rows) {
-    try {
-      const mapping = await getActiveMapping(db, source.id);
-      const profile = await getSourceProfile(db, source.id);
-      const document = mapping.document as MappingDocument;
-
-      for (const entity of document.entities) {
-        compiled.push(
-          ...compileToolsForEntity({
-            entity,
-            profile,
-            mappingVersion: mapping.version,
-            sourceIds: [source.id],
-            workspaceName: workspace.name,
-            sourceName: source.name,
-          }),
-        );
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'unknown error';
-      warnings.push(`Source "${source.name}" skipped while compiling tools: ${message}`);
+  return withWorkspaceContext(db, workspaceId, async (tx) => {
+    const [workspace] = await tx
+      .select({ id: workspaces.id, name: workspaces.name })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    if (!workspace) {
+      throw GatewayError.notFound('Workspace not found');
     }
-  }
 
-  return {
-    workspaceId,
-    generatedAt: new Date().toISOString(),
-    warnings,
-    tools: mergeToolDefinitions(compiled),
-  };
+    const rows = await tx
+      .select()
+      .from(sources)
+      .where(and(eq(sources.workspaceId, workspaceId), eq(sources.maturityStatus, 'agent_ready')));
+
+    const compiled: ToolDefinition[] = [];
+    const warnings: string[] = [];
+    for (const source of rows) {
+      try {
+        const mapping = await getActiveMapping(tx, source.id);
+        const profile = await getSourceProfile(tx, source.id);
+        const document = mapping.document as MappingDocument;
+
+        for (const entity of document.entities) {
+          compiled.push(
+            ...compileToolsForEntity({
+              entity,
+              profile,
+              mappingVersion: mapping.version,
+              sourceIds: [source.id],
+              workspaceName: workspace.name,
+              sourceName: source.name,
+            }),
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown error';
+        warnings.push(`Source "${source.name}" skipped while compiling tools: ${message}`);
+      }
+    }
+
+    return {
+      workspaceId,
+      generatedAt: new Date().toISOString(),
+      warnings,
+      tools: mergeToolDefinitions(compiled),
+    };
+  });
 }
 
 export type InvokeToolInput = {
@@ -70,6 +73,9 @@ export type InvokeToolInput = {
   args: Record<string, unknown>;
   embeddingProvider: EmbeddingProvider;
   llmProvider?: LlmProvider;
+  softDeadlineMs?: number;
+  hardTimeoutMs?: number;
+  enableSynonymExpansion?: boolean;
 };
 
 export async function invokeTool(input: InvokeToolInput): Promise<ToolInvokeResponse> {
@@ -107,6 +113,11 @@ async function invokeSearchTool(
     allowedSourceIds: tool.sourceIds,
     embeddingProvider: input.embeddingProvider,
     ...(input.llmProvider ? { llmProvider: input.llmProvider } : {}),
+    ...(input.softDeadlineMs !== undefined ? { softDeadlineMs: input.softDeadlineMs } : {}),
+    ...(input.hardTimeoutMs !== undefined ? { hardTimeoutMs: input.hardTimeoutMs } : {}),
+    ...(input.enableSynonymExpansion !== undefined
+      ? { enableSynonymExpansion: input.enableSynonymExpansion }
+      : {}),
     logContext: {
       toolName: tool.name,
       mappingVersion: tool.mappingVersion,

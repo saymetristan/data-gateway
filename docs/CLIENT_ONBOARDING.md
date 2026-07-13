@@ -29,6 +29,8 @@ sequenceDiagram
   Whaapy->>API: MCP tools/list + tools/call via mcp.data.whaapy.com
 ```
 
+
+
 ## 1. Workspace y API key
 
 Una key de workspace sirve para **API y MCP** (mismo `dgw_live_...` como bearer).
@@ -116,11 +118,13 @@ curl "$GATEWAY_URL/sources/{source_id}/profile" -H "Authorization: Bearer $WORKS
 
 Define por campo:
 
-| Flag | Efecto en tools |
-| --- | --- |
-| `searchable` | Entra al índice semántico |
+
+| Flag         | Efecto en tools                                                 |
+| ------------ | --------------------------------------------------------------- |
+| `searchable` | Entra al índice semántico                                       |
 | `filterable` | Se expone como parámetro en `search_*` / `check_availability_*` |
-| `sensitive` | Nunca sale en respuestas |
+| `sensitive`  | Nunca sale en respuestas                                        |
+
 
 Ajusta el mapping a la ontología del negocio (no uses el auto-mapping del script para prod).
 
@@ -152,12 +156,14 @@ Sin evals que pasen el threshold, `activate` no debería usarse en prod.
 
 En el dashboard del cliente → MCPs:
 
-| Campo | Valor |
-| --- | --- |
-| URL | `https://mcp.data.whaapy.com/mcp` |
-| Transporte | Streamable HTTP |
-| Auth | Bearer = `WORKSPACE_KEY` |
-| Protocol | `MCP-Protocol-Version: 2025-06-18` |
+
+| Campo      | Valor                              |
+| ---------- | ---------------------------------- |
+| URL        | `https://mcp.data.whaapy.com/mcp`  |
+| Transporte | Streamable HTTP                    |
+| Auth       | Bearer = `WORKSPACE_KEY`           |
+| Protocol   | `MCP-Protocol-Version: 2025-06-18` |
+
 
 Las tools (`search_product`, etc.) aparecen tras `tools/list`. Configúralas en Subagents/Tools con las descripciones semánticas (`When to use`, `Fallback`).
 
@@ -194,12 +200,14 @@ Para producción, `--evals` debe contener casos reales del cliente con `expected
 
 ## Monitoreo post-onboarding
 
-| Check | URL | Esperado |
-| --- | --- | --- |
-| API health | `https://data.whaapy.com/health` | `200`, `db: connected` |
-| MCP health | `https://mcp.data.whaapy.com/health` | `200`, `ok: true` |
-| Métricas | `GET /metrics` (admin) | p50/p95, colas pg-boss |
-| Query logs | `GET /query-logs` (workspace key) | latencia y errores |
+
+| Check      | URL                                  | Esperado               |
+| ---------- | ------------------------------------ | ---------------------- |
+| API health | `https://data.whaapy.com/health`     | `200`, `db: connected` |
+| MCP health | `https://mcp.data.whaapy.com/health` | `200`, `ok: true`      |
+| Métricas   | `GET /metrics` (admin)               | p50/p95, colas pg-boss |
+| Query logs | `GET /query-logs` (workspace key)    | latencia y errores     |
+
 
 Configura UptimeRobot (o similar) con intervalo 5 min sobre los dos `/health`.
 

@@ -51,6 +51,13 @@ curl -X POST "https://data.whaapy.com/evals/sets/{set_id}/cases" \
 
 Crea entre 10 y 20 casos para tener una red de seguridad razonable.
 
+Si creaste un caso con expectativas incorrectas, elimínalo antes de correr el set:
+
+```bash
+curl -X DELETE "https://data.whaapy.com/evals/sets/{set_id}/cases/{case_id}" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
 ## 3. Correr las Pruebas
 
 Inicia una "corrida" de pruebas (run).

@@ -23,6 +23,7 @@ paths:
       responses:
         "200":
           description: OK
+
           content:
             application/json:
               schema:
@@ -148,6 +149,163 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        "200":
+          description: OK
+  /evals/sets:
+    get:
+      summary: Listar Evaluation Sets
+      description: Devuelve los sets de evaluación del workspace. Requiere el scope `evals:read`.
+      operationId: listEvalSets
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+    post:
+      summary: Crear Evaluation Set
+      description: Crea un set de evaluación global o asociado a una fuente. Requiere el scope `evals:write`.
+      operationId: createEvalSet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                threshold:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                  default: 0.8
+                sourceId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Created
+  /evals/sets/{id}:
+    get:
+      summary: Obtener Evaluation Set
+      description: Devuelve un set de evaluación con todos sus cases. Requiere el scope `evals:read`.
+      operationId: getEvalSet
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+  /evals/sets/{id}/cases:
+    post:
+      summary: Crear Eval Case
+      description: Agrega un caso de evaluación a un set. Requiere el scope `evals:write`.
+      operationId: createEvalCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                expectedExternalIds:
+                  type: array
+                  items:
+                    type: string
+                mustApplyFilters:
+                  type: array
+                  items:
+                    type: object
+                mustNotContainFields:
+                  type: array
+                  items:
+                    type: string
+              anyOf:
+                - required: [expectedExternalIds]
+                - required: [mustApplyFilters]
+                - required: [mustNotContainFields]
+      responses:
+        "201":
+          description: Created
+  /evals/sets/{id}/cases/{caseId}:
+    delete:
+      summary: Eliminar Eval Case
+      description: Elimina un caso de evaluación mal creado antes de correr el set. Requiere el scope `evals:write`.
+      operationId: deleteEvalCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Eval set or eval case not found
+  /evals/run:
+    post:
+      summary: Correr Evaluation Set
+      description: Encola una corrida de evaluación. Requiere el scope `evals:write`.
+      operationId: runEvalSet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - evalSetId
+              properties:
+                evalSetId:
+                  type: string
+                  format: uuid
+      responses:
+        "202":
+          description: Queued
+  /evals/runs/{id}:
+    get:
+      summary: Obtener Eval Run
+      description: Devuelve estado, métricas y resultados de una corrida. Requiere el scope `evals:read`.
+      operationId: getEvalRun
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: OK

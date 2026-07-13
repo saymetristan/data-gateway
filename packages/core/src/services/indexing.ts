@@ -160,29 +160,42 @@ export async function indexSource(
 
   const embeddingRecordIds = [...recordIdsForEmbedding];
   if (options.embeddingModel) {
-    const missingIds = await findRecordsMissingActiveEmbeddings(
+    const hasPendingBackfill = await hasPendingEmbeddingJobsForSourceVersion(
       db,
       sourceId,
       mapping.version,
-      options.embeddingModel,
     );
-    const seen = new Set(embeddingRecordIds);
-    for (const recordId of missingIds) {
-      if (!seen.has(recordId)) {
-        embeddingRecordIds.push(recordId);
-        seen.add(recordId);
+
+    if (!hasPendingBackfill) {
+      const missingIds = await findRecordsMissingActiveEmbeddings(
+        db,
+        sourceId,
+        mapping.version,
+        options.embeddingModel,
+      );
+      const seen = new Set(embeddingRecordIds);
+      for (const recordId of missingIds) {
+        if (!seen.has(recordId)) {
+          embeddingRecordIds.push(recordId);
+          seen.add(recordId);
+        }
       }
     }
   }
 
   for (let i = 0; i < embeddingRecordIds.length; i += EMBEDDING_BATCH_SIZE) {
     const batch = embeddingRecordIds.slice(i, i + EMBEDDING_BATCH_SIZE);
-    await enqueueJob(connectionString, EMBEDDINGS_GENERATE_JOB, {
-      sourceId,
-      workspaceId,
-      recordIds: batch,
-      mappingVersion: mapping.version,
-    });
+    await enqueueJob(
+      connectionString,
+      EMBEDDINGS_GENERATE_JOB,
+      {
+        sourceId,
+        workspaceId,
+        recordIds: batch,
+        mappingVersion: mapping.version,
+      },
+      { singletonKey: `embeddings:${sourceId}:${String(mapping.version)}:${payloadHash(batch)}` },
+    );
   }
 
   if (invalidateMaturity) {
@@ -366,6 +379,26 @@ export async function findRecordsMissingActiveEmbeddings(
   return rows.map((row) => row.id);
 }
 
+async function hasPendingEmbeddingJobsForSourceVersion(
+  db: Database,
+  sourceId: string,
+  mappingVersion: number,
+): Promise<boolean> {
+  try {
+    const result = await db.execute<{ count: string }>(sql`
+      SELECT COUNT(*)::text AS count
+      FROM pgboss.job
+      WHERE name = ${EMBEDDINGS_GENERATE_JOB}
+        AND state IN ('created', 'active', 'retry')
+        AND data->>'sourceId' = ${sourceId}
+        AND data->>'mappingVersion' = ${String(mappingVersion)}
+    `);
+    return Number(result.rows[0]?.count ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function purgeOldEmbeddingsForSource(
   db: Database,
   sourceId: string,
@@ -424,6 +457,20 @@ export async function generateEmbeddingsForRecords(
 ): Promise<number> {
   if (recordIds.length === 0) return 0;
 
+  const existingEmbeddings = await db
+    .select({ recordId: recordEmbeddings.recordId })
+    .from(recordEmbeddings)
+    .where(
+      and(
+        inArray(recordEmbeddings.recordId, recordIds),
+        eq(recordEmbeddings.embeddingModel, embeddingProvider.model),
+        eq(recordEmbeddings.mappingVersion, mappingVersion),
+      ),
+    );
+  const alreadyEmbedded = new Set(existingEmbeddings.map((row) => row.recordId));
+  const missingRecordIds = recordIds.filter((recordId) => !alreadyEmbedded.has(recordId));
+  if (missingRecordIds.length === 0) return 0;
+
   const mapping = await getMappingByVersion(db, sourceId, mappingVersion);
   const document = mapping.document as MappingDocument;
   const entityMap = new Map(document.entities.map((entity) => [entity.entity, entity]));
@@ -431,7 +478,7 @@ export async function generateEmbeddingsForRecords(
   const rows = await db
     .select()
     .from(records)
-    .where(and(eq(records.sourceId, sourceId), inArray(records.id, recordIds)));
+    .where(and(eq(records.sourceId, sourceId), inArray(records.id, missingRecordIds)));
 
   const texts: string[] = [];
   const targets: typeof rows = [];

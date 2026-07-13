@@ -9,6 +9,10 @@ const LEXICAL_CANDIDATE_LIMIT = 50;
 const VECTOR_CANDIDATE_LIMIT = 50;
 const TRIGRAM_THRESHOLD = 0.3;
 
+/** Default RRF weights: slight lexical bias when vector is late/noisy. */
+export const DEFAULT_LEXICAL_RRF_WEIGHT = 1;
+export const DEFAULT_VECTOR_RRF_WEIGHT = 1.1;
+
 export type RetrievalHit = {
   id: string;
   entity: string;
@@ -32,6 +36,17 @@ export type HybridSearchInput = {
   filterableFields: Set<string>;
   embeddingProvider?: EmbeddingProvider;
   embeddingsAvailableBySource: Map<string, boolean>;
+  /**
+   * Precomputed query embedding.
+   * - `undefined`: compute inside hybridSearch via embeddingProvider
+   * - `null`: embed failed upstream; skip vector and use lexical only
+   * - `number[]`: use this vector for ANN search
+   */
+  queryEmbedding?: number[] | null;
+  lexicalWeight?: number;
+  vectorWeight?: number;
+  /** Optional precomputed lexical rows (parallel path). */
+  precomputedLexicalRows?: RawRecordRow[];
 };
 
 export type HybridSearchResult = {
@@ -42,7 +57,7 @@ export type HybridSearchResult = {
   warnings: string[];
 };
 
-type RawRecordRow = {
+export type RawRecordRow = {
   id: string;
   entity: string;
   source_id: string;
@@ -51,6 +66,17 @@ type RawRecordRow = {
   rank?: number;
   distance?: number;
   lexical_match?: boolean;
+};
+
+export type RetrievalScope = {
+  db: Database;
+  workspaceId: string;
+  sourceIds: string[];
+  entity?: string;
+  filters: NormalizedFilter[];
+  filterableFields: Set<string>;
+  freeText: string;
+  limit: number;
 };
 
 export async function hybridSearch(input: HybridSearchInput): Promise<HybridSearchResult> {
@@ -76,22 +102,33 @@ export async function hybridSearch(input: HybridSearchInput): Promise<HybridSear
     };
   }
 
-  const lexicalRows = await lexicalSearch(input);
+  const lexicalRows =
+    input.precomputedLexicalRows ?? (await lexicalSearch(toScope(input)));
   const lexicalRanking = lexicalRows.map((row) => row.id);
 
   let vectorRows: RawRecordRow[] = [];
   let vectorRanking: string[] = [];
   let anyEmbeddings = false;
 
-  for (const sourceId of input.sourceIds) {
-    if (!input.embeddingsAvailableBySource.get(sourceId)) continue;
-    anyEmbeddings = true;
+  const sourcesWithEmbeddings = input.sourceIds.filter((sourceId) =>
+    input.embeddingsAvailableBySource.get(sourceId),
+  );
+  anyEmbeddings = sourcesWithEmbeddings.length > 0;
+
+  let queryEmbedding = input.queryEmbedding;
+  if (anyEmbeddings && queryEmbedding === undefined) {
     try {
-      const rows = await vectorSearch(input, sourceId);
-      vectorRows = vectorRows.concat(rows);
+      queryEmbedding = await resolveQueryEmbedding(input);
     } catch {
-      warnings.push(`Vector search failed for source ${sourceId}; using lexical only`);
+      queryEmbedding = null;
+      warnings.push('Query embedding failed; using lexical search only');
     }
+  } else if (anyEmbeddings && queryEmbedding === null) {
+    warnings.push('Query embedding failed; using lexical search only');
+  }
+
+  if (queryEmbedding) {
+    vectorRows = await vectorSearchAcrossSources(input, sourcesWithEmbeddings, queryEmbedding, warnings);
   }
 
   vectorRows.sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
@@ -101,74 +138,34 @@ export async function hybridSearch(input: HybridSearchInput): Promise<HybridSear
     if (!anyEmbeddings) {
       warnings.push('No embeddings available for source; using lexical search only');
     }
-    const hits = lexicalRows.slice(0, input.limit).map((row, index) => ({
-      id: row.id,
-      entity: row.entity,
-      sourceId: row.source_id,
-      data: row.data,
-      searchSource: row.search_source,
-      score: row.rank ?? 1 - index * 0.001,
-      lexicalMatch: row.lexical_match ?? true,
-    }));
-
     return {
       queryType: 'lexical',
-      hits,
+      hits: lexicalRowsToHits(lexicalRows, input.limit),
       lexicalRanking,
       vectorRanking,
       warnings,
     };
   }
 
-  const fused = reciprocalRankFusion([lexicalRanking, vectorRanking]);
-  const rowById = new Map<string, RawRecordRow>();
-  for (const row of [...lexicalRows, ...vectorRows]) {
-    rowById.set(row.id, row);
-  }
-
-  const hits: RetrievalHit[] = [];
-  for (const item of fused.slice(0, input.limit)) {
-    const row = rowById.get(item.id);
-    if (!row) continue;
-    hits.push({
-      id: row.id,
-      entity: row.entity,
-      sourceId: row.source_id,
-      data: row.data,
-      searchSource: row.search_source,
-      score: item.score,
-      lexicalMatch: row.lexical_match ?? lexicalRanking.includes(row.id),
-    });
-  }
-
   return {
     queryType: 'hybrid_search',
-    hits,
+    hits: fuseHits(lexicalRows, vectorRows, lexicalRanking, vectorRanking, {
+      limit: input.limit,
+      ...(input.lexicalWeight !== undefined ? { lexicalWeight: input.lexicalWeight } : {}),
+      ...(input.vectorWeight !== undefined ? { vectorWeight: input.vectorWeight } : {}),
+    }),
     lexicalRanking,
     vectorRanking,
     warnings,
   };
 }
 
-async function filterOnlySearch(input: HybridSearchInput): Promise<RawRecordRow[]> {
-  const where = buildWhereClause(input);
-  const result = await input.db.execute(sql`
-    SELECT r.id, r.entity, r.source_id, r.data, r.search_source
-    FROM records r
-    WHERE ${where}
-    ORDER BY r.updated_at DESC
-    LIMIT ${input.limit}
-  `);
-
-  return rowsFromResult(result);
-}
-
-async function lexicalSearch(input: HybridSearchInput): Promise<RawRecordRow[]> {
-  const where = buildWhereClause(input);
-  const queryText = input.freeText.trim();
+export async function lexicalSearch(scope: RetrievalScope): Promise<RawRecordRow[]> {
+  const where = buildWhereClause(scope);
+  const queryText = scope.freeText.trim();
   const useTrigram = isShortSkuLikeQuery(queryText);
 
-  const result = await input.db.execute(sql`
+  const result = await scope.db.execute(sql`
     SELECT
       r.id,
       r.entity,
@@ -193,20 +190,27 @@ async function lexicalSearch(input: HybridSearchInput): Promise<RawRecordRow[]> 
   return rowsFromResult(result);
 }
 
-async function vectorSearch(
-  input: HybridSearchInput,
+export async function vectorSearchForSource(
+  input: {
+    db: Database;
+    workspaceId: string;
+    entity?: string;
+    filters: NormalizedFilter[];
+    filterableFields: Set<string>;
+    embeddingModel: string;
+    mappingVersion: number;
+  },
   sourceId: string,
+  vector: number[],
 ): Promise<RawRecordRow[]> {
-  if (!input.embeddingProvider) return [];
-
-  const mappingVersion = input.mappingVersionBySource.get(sourceId);
-  if (!mappingVersion) return [];
-
-  const [vector] = await input.embeddingProvider.embed([input.freeText.trim()]);
-  if (!vector) return [];
-
   const vectorLiteral = `[${vector.join(',')}]`;
-  const where = buildWhereClause({ ...input, sourceIds: [sourceId] });
+  const where = buildWhereClause({
+    workspaceId: input.workspaceId,
+    sourceIds: [sourceId],
+    ...(input.entity ? { entity: input.entity } : {}),
+    filters: input.filters,
+    filterableFields: input.filterableFields,
+  });
 
   const result = await input.db.execute(sql`
     SELECT
@@ -220,7 +224,7 @@ async function vectorSearch(
     INNER JOIN record_embeddings re ON re.record_id = r.id
     WHERE ${where}
       AND re.embedding_model = ${input.embeddingModel}
-      AND re.mapping_version = ${mappingVersion}
+      AND re.mapping_version = ${input.mappingVersion}
     ORDER BY distance ASC
     LIMIT ${VECTOR_CANDIDATE_LIMIT}
   `);
@@ -228,7 +232,166 @@ async function vectorSearch(
   return rowsFromResult(result);
 }
 
-function buildWhereClause(input: HybridSearchInput): SQL {
+export function fuseLexicalAndVector(input: {
+  lexicalRows: RawRecordRow[];
+  vectorRows: RawRecordRow[];
+  limit: number;
+  lexicalWeight?: number;
+  vectorWeight?: number;
+}): HybridSearchResult {
+  const lexicalRanking = input.lexicalRows.map((row) => row.id);
+  const vectorRanking = [...input.vectorRows]
+    .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
+    .slice(0, VECTOR_CANDIDATE_LIMIT)
+    .map((row) => row.id);
+
+  if (vectorRanking.length === 0) {
+    return {
+      queryType: 'lexical',
+      hits: lexicalRowsToHits(input.lexicalRows, input.limit),
+      lexicalRanking,
+      vectorRanking,
+      warnings: [],
+    };
+  }
+
+  return {
+    queryType: 'hybrid_search',
+    hits: fuseHits(
+      input.lexicalRows,
+      input.vectorRows,
+      lexicalRanking,
+      vectorRanking,
+      {
+        limit: input.limit,
+        ...(input.lexicalWeight !== undefined ? { lexicalWeight: input.lexicalWeight } : {}),
+        ...(input.vectorWeight !== undefined ? { vectorWeight: input.vectorWeight } : {}),
+      },
+    ),
+    lexicalRanking,
+    vectorRanking,
+    warnings: [],
+  };
+}
+
+export function lexicalRowsToHits(rows: RawRecordRow[], limit: number): RetrievalHit[] {
+  return rows.slice(0, limit).map((row, index) => ({
+    id: row.id,
+    entity: row.entity,
+    sourceId: row.source_id,
+    data: row.data,
+    searchSource: row.search_source,
+    score: row.rank ?? 1 - index * 0.001,
+    lexicalMatch: row.lexical_match ?? true,
+  }));
+}
+
+async function vectorSearchAcrossSources(
+  input: HybridSearchInput,
+  sourceIds: string[],
+  queryEmbedding: number[],
+  warnings: string[],
+): Promise<RawRecordRow[]> {
+  let vectorRows: RawRecordRow[] = [];
+  for (const sourceId of sourceIds) {
+    const mappingVersion = input.mappingVersionBySource.get(sourceId);
+    if (!mappingVersion) continue;
+    try {
+      const rows = await vectorSearchForSource(
+        {
+          db: input.db,
+          workspaceId: input.workspaceId,
+          ...(input.entity ? { entity: input.entity } : {}),
+          filters: input.filters,
+          filterableFields: input.filterableFields,
+          embeddingModel: input.embeddingModel,
+          mappingVersion,
+        },
+        sourceId,
+        queryEmbedding,
+      );
+      vectorRows = vectorRows.concat(rows);
+    } catch {
+      warnings.push(`Vector search failed for source ${sourceId}; using lexical only`);
+    }
+  }
+  return vectorRows;
+}
+
+function fuseHits(
+  lexicalRows: RawRecordRow[],
+  vectorRows: RawRecordRow[],
+  lexicalRanking: string[],
+  vectorRanking: string[],
+  input: { limit: number; lexicalWeight?: number; vectorWeight?: number },
+): RetrievalHit[] {
+  const fused = reciprocalRankFusion([
+    { ids: lexicalRanking, weight: input.lexicalWeight ?? DEFAULT_LEXICAL_RRF_WEIGHT },
+    { ids: vectorRanking, weight: input.vectorWeight ?? DEFAULT_VECTOR_RRF_WEIGHT },
+  ]);
+  const rowById = new Map<string, RawRecordRow>();
+  for (const row of [...lexicalRows, ...vectorRows]) {
+    rowById.set(row.id, row);
+  }
+
+  const hits: RetrievalHit[] = [];
+  for (const item of fused.slice(0, input.limit)) {
+    const row = rowById.get(item.id);
+    if (!row) continue;
+    hits.push({
+      id: row.id,
+      entity: row.entity,
+      sourceId: row.source_id,
+      data: row.data,
+      searchSource: row.search_source,
+      score: item.score,
+      lexicalMatch: row.lexical_match ?? lexicalRanking.includes(row.id),
+    });
+  }
+  return hits;
+}
+
+async function filterOnlySearch(input: HybridSearchInput): Promise<RawRecordRow[]> {
+  const where = buildWhereClause(toScope(input));
+  const result = await input.db.execute(sql`
+    SELECT r.id, r.entity, r.source_id, r.data, r.search_source
+    FROM records r
+    WHERE ${where}
+    ORDER BY r.updated_at DESC
+    LIMIT ${input.limit}
+  `);
+
+  return rowsFromResult(result);
+}
+
+async function resolveQueryEmbedding(input: HybridSearchInput): Promise<number[] | null> {
+  if (!input.embeddingProvider) return null;
+  const text = input.freeText.trim();
+  if (!text) return null;
+  const [vector] = await input.embeddingProvider.embed([text]);
+  return vector ?? null;
+}
+
+function toScope(input: HybridSearchInput): RetrievalScope {
+  return {
+    db: input.db,
+    workspaceId: input.workspaceId,
+    sourceIds: input.sourceIds,
+    ...(input.entity ? { entity: input.entity } : {}),
+    filters: input.filters,
+    filterableFields: input.filterableFields,
+    freeText: input.freeText,
+    limit: input.limit,
+  };
+}
+
+function buildWhereClause(input: {
+  workspaceId: string;
+  sourceIds: string[];
+  entity?: string;
+  filters: NormalizedFilter[];
+  filterableFields: Set<string>;
+}): SQL {
   const parts: SQL[] = [sql`r.workspace_id = ${input.workspaceId}`];
 
   if (input.sourceIds.length === 1) {

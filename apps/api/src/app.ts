@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
+import { timeout } from 'hono/timeout';
 import type { Database, EmbeddingProvider, LlmProvider } from '@data-gateway/core';
 import { GatewayError, gatewayErrorToHttp, pingDb } from '@data-gateway/core';
 import type { ApiEnv } from './env.js';
@@ -34,13 +36,19 @@ function useWorkspaceProtection(
   app: Hono<{ Variables: AppVariables }>,
   paths: string[],
   rateLimiter: ReturnType<typeof createRateLimiter>,
+  options: { rls?: boolean } = {},
 ): void {
+  const enableRls = options.rls ?? true;
   for (const path of paths) {
     app.use(path, workspaceAuth());
     app.use(path, rateLimiter);
-    app.use(path, rlsContext());
+    if (enableRls) {
+      app.use(path, rlsContext());
+    }
   }
 }
+
+const REQUEST_TIMEOUT_MS = 25_000;
 
 export function createApp(deps: AppBindings) {
   const app = new Hono<{ Variables: AppVariables }>();
@@ -50,6 +58,10 @@ export function createApp(deps: AppBindings) {
   });
 
   app.onError((error, c) => {
+    if (error instanceof HTTPException) {
+      return error.getResponse();
+    }
+
     if (error instanceof GatewayError) {
       const { status, body } = gatewayErrorToHttp(error);
       return c.newResponse(JSON.stringify(body), status, {
@@ -62,6 +74,16 @@ export function createApp(deps: AppBindings) {
   });
 
   app.use('*', requestLogger());
+  app.use(
+    '*',
+    timeout(
+      REQUEST_TIMEOUT_MS,
+      () =>
+        new HTTPException(504, {
+          message: 'Request timeout',
+        }),
+    ),
+  );
   app.use('*', async (c, next) => {
     c.set('db', deps.db);
     await next();
@@ -76,7 +98,9 @@ export function createApp(deps: AppBindings) {
   useWorkspaceProtection(app, ['/sources', '/sources/*'], rateLimiter);
   app.route('/sources', sourceRoutes(deps));
 
-  useWorkspaceProtection(app, ['/query', '/query/*'], rateLimiter);
+  // Query/tools manage short RLS transactions internally so embeddings/LLM
+  // calls do not hold a pool connection for the whole request.
+  useWorkspaceProtection(app, ['/query', '/query/*'], rateLimiter, { rls: false });
   app.route('/query', queryRoutes(deps));
 
   useWorkspaceProtection(app, ['/query-logs', '/query-logs/*'], rateLimiter);
@@ -85,7 +109,7 @@ export function createApp(deps: AppBindings) {
   useWorkspaceProtection(app, ['/evals', '/evals/*'], rateLimiter);
   app.route('/evals', evalRoutes(deps));
 
-  useWorkspaceProtection(app, ['/tools', '/tools/*'], rateLimiter);
+  useWorkspaceProtection(app, ['/tools', '/tools/*'], rateLimiter, { rls: false });
   app.route('/tools', toolRoutes(deps));
 
   app.use('/metrics', adminAuth(deps.env.ADMIN_API_KEY));

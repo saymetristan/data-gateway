@@ -9,10 +9,24 @@ let pool: pg.Pool | undefined;
 
 // Supabase session pooler limita a 15 conexiones totales; mantener pools chicos.
 const DEFAULT_POOL_MAX = 5;
+const DEFAULT_CONNECTION_TIMEOUT_MS = 5_000;
+const DEFAULT_STATEMENT_TIMEOUT_MS = 10_000;
 
 export function createPool(connectionString: string): pg.Pool {
   const max = Number(process.env.DATABASE_POOL_MAX ?? DEFAULT_POOL_MAX);
-  return new pg.Pool({ connectionString, max });
+  const connectionTimeoutMillis = Number(
+    process.env.DATABASE_CONNECTION_TIMEOUT_MS ?? DEFAULT_CONNECTION_TIMEOUT_MS,
+  );
+  const statementTimeoutMs = Number(
+    process.env.DATABASE_STATEMENT_TIMEOUT_MS ?? DEFAULT_STATEMENT_TIMEOUT_MS,
+  );
+
+  return new pg.Pool({
+    connectionString,
+    max,
+    connectionTimeoutMillis,
+    options: `-c statement_timeout=${String(statementTimeoutMs)}`,
+  });
 }
 
 export function createDbFromPool(targetPool: pg.Pool): Database {

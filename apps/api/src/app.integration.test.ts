@@ -43,6 +43,11 @@ describe.runIf(hasDatabase)('API integration', () => {
       NODE_ENV: 'test',
       EMBEDDING_MODEL: 'mock-embedding',
       EMBEDDING_DIMENSIONS: 1024,
+      EMBEDDING_SOFT_DEADLINE_MS: 1500,
+      EMBEDDING_HARD_TIMEOUT_MS: 3000,
+      EMBEDDING_CIRCUIT_FAILURE_THRESHOLD: 5,
+      EMBEDDING_CIRCUIT_RECOVERY_MS: 30000,
+      ENABLE_QUERY_SYNONYM_EXPANSION: true,
       LLM_MODEL: 'mock-llm',
       USE_MOCK_PROVIDERS: true,
       RATE_LIMIT_MAX: 0,
@@ -127,6 +132,107 @@ describe.runIf(hasDatabase)('API integration', () => {
       body: JSON.stringify({ evalSetId: crypto.randomUUID() }),
     });
     expect(res.status).toBe(401);
+  });
+
+  it('deletes eval cases without crossing workspace boundaries', async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const wsARes = await app.request('/workspaces', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Eval Delete A', slug: `eval-delete-a-${suffix}` }),
+    });
+    expect(wsARes.status).toBe(201);
+    const workspaceA = (await wsARes.json()) as { id: string };
+
+    const wsBRes = await app.request('/workspaces', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Eval Delete B', slug: `eval-delete-b-${suffix}` }),
+    });
+    expect(wsBRes.status).toBe(201);
+    const workspaceB = (await wsBRes.json()) as { id: string };
+
+    const keyARes = await app.request(`/workspaces/${workspaceA.id}/api-keys`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ scopes: ['evals:read', 'evals:write'] }),
+    });
+    expect(keyARes.status).toBe(201);
+    const { key: keyA } = (await keyARes.json()) as { key: string };
+
+    const keyBRes = await app.request(`/workspaces/${workspaceB.id}/api-keys`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ scopes: ['evals:write'] }),
+    });
+    expect(keyBRes.status).toBe(201);
+    const { key: keyB } = (await keyBRes.json()) as { key: string };
+
+    const setRes = await app.request('/evals/sets', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${keyA}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Case deletion', threshold: 0.8 }),
+    });
+    expect(setRes.status).toBe(201);
+    const evalSet = (await setRes.json()) as { id: string };
+
+    const caseRes = await app.request(`/evals/sets/${evalSet.id}/cases`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${keyA}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: 'producto equivocado',
+        expectedExternalIds: ['SKU-WRONG'],
+      }),
+    });
+    expect(caseRes.status).toBe(201);
+    const evalCase = (await caseRes.json()) as { id: string };
+
+    const crossWorkspaceDelete = await app.request(
+      `/evals/sets/${evalSet.id}/cases/${evalCase.id}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${keyB}` },
+      },
+    );
+    expect(crossWorkspaceDelete.status).toBe(404);
+
+    const deleteRes = await app.request(`/evals/sets/${evalSet.id}/cases/${evalCase.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${keyA}` },
+    });
+    expect(deleteRes.status).toBe(204);
+    expect(await deleteRes.text()).toBe('');
+
+    const getSetRes = await app.request(`/evals/sets/${evalSet.id}`, {
+      headers: { Authorization: `Bearer ${keyA}` },
+    });
+    expect(getSetRes.status).toBe(200);
+    const setWithCases = (await getSetRes.json()) as { cases: Array<{ id: string }> };
+    expect(setWithCases.cases).toHaveLength(0);
+
+    const secondDelete = await app.request(`/evals/sets/${evalSet.id}/cases/${evalCase.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${keyA}` },
+    });
+    expect(secondDelete.status).toBe(404);
   });
 
   it('creates workspace, api key and source end-to-end', async () => {

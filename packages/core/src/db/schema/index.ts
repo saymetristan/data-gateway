@@ -8,6 +8,7 @@ export * from './records.js';
 export * from './record-embeddings.js';
 export * from './record-enrichments.js';
 export * from './query-logs.js';
+export * from './query-embedding-cache.js';
 export * from './evals.js';
 export * from './source-transitions.js';
 export * from './webhook-events.js';

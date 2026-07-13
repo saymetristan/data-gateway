@@ -1,3 +1,5 @@
+export const DEFAULT_LLM_TIMEOUT_MS = 10_000;
+
 export interface LlmProvider {
   readonly model: string;
   complete(prompt: string): Promise<string>;
@@ -22,11 +24,18 @@ export class OpenRouterLlmProvider implements LlmProvider {
   readonly model: string;
   private readonly apiKey: string;
   private readonly baseUrl: string;
+  private readonly timeoutMs: number;
 
-  constructor(options: { apiKey: string; model: string; baseUrl?: string }) {
+  constructor(options: {
+    apiKey: string;
+    model: string;
+    baseUrl?: string;
+    timeoutMs?: number;
+  }) {
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.baseUrl = options.baseUrl ?? 'https://openrouter.ai/api/v1';
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;
   }
 
   async complete(prompt: string): Promise<string> {
@@ -41,6 +50,7 @@ export class OpenRouterLlmProvider implements LlmProvider {
         messages: [{ role: 'user', content: prompt }],
         temperature: 0,
       }),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     if (!response.ok) {

@@ -41,6 +41,9 @@ export function toolRoutes(deps: AppBindings) {
       args: parsed.data.args,
       embeddingProvider: deps.embeddingProvider,
       llmProvider: deps.llmProvider,
+      softDeadlineMs: deps.env.EMBEDDING_SOFT_DEADLINE_MS,
+      hardTimeoutMs: deps.env.EMBEDDING_HARD_TIMEOUT_MS,
+      enableSynonymExpansion: deps.env.ENABLE_QUERY_SYNONYM_EXPANSION,
     });
 
     return c.json(response);

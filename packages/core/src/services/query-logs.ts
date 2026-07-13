@@ -56,6 +56,10 @@ export async function listQueryLogs(
       latencyMs: row.latencyMs,
       warnings: Array.isArray(row.warnings) ? (row.warnings as string[]) : null,
       error: row.error,
+      metadata:
+        row.metadata && typeof row.metadata === 'object'
+          ? (row.metadata as Record<string, unknown>)
+          : null,
       createdAt: row.createdAt.toISOString(),
     })),
     nextCursor:

@@ -10,7 +10,11 @@ import { registerShopifyWebhooks } from './shopify-sync.js';
 import { GatewayError } from '../errors/gateway-error.js';
 import type { CreateSourceInput } from '../schemas/index.js';
 import { enqueueJob } from '../queue/boss.js';
-import { SOURCE_SYNC_JOB } from '../queue/jobs.js';
+import {
+  SOURCE_SYNC_EXPIRE_IN_HOURS,
+  SOURCE_SYNC_JOB,
+  SOURCE_SYNC_SINGLETON_MINUTES,
+} from '../queue/jobs.js';
 
 export async function createSourceWithValidation(
   db: Database,
@@ -96,7 +100,11 @@ export async function createSourceWithValidation(
           workspaceId,
           fullSync: true,
         },
-        { singletonKey: `source-sync:${source.id}` },
+        {
+          singletonKey: `source-sync:${source.id}`,
+          singletonMinutes: SOURCE_SYNC_SINGLETON_MINUTES,
+          expireInHours: SOURCE_SYNC_EXPIRE_IN_HOURS,
+        },
       );
 
       if (

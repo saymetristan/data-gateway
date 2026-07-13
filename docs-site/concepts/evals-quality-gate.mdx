@@ -19,6 +19,8 @@ Un **Evaluation Set** contiene múltiples preguntas típicas de tu negocio (**Ca
 
 Para cada caso (query), tú defines los `expectedExternalIds` (los IDs de origen que sabes que son correctos para esa pregunta). Adicionalmente, puedes requerir que ciertos filtros se apliquen o que ciertos campos no se revelen.
 
+Si un case quedó mal definido, puedes borrarlo con `DELETE /evals/sets/:id/cases/:caseId` y volverlo a crear antes de ejecutar el run. Los runs usan los cases actuales del set.
+
 ### Ejemplo de flujo
 1. Envías una batería de 20 consultas típicas de tus clientes a través de la API.
 2. El Gateway corre estas consultas con su motor.

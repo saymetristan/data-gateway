@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { count, eq } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import {
   createSourceSchema,
   createSourceWithValidation,
@@ -13,11 +13,14 @@ import {
   getSourceProfile,
   getSourceStatus,
   ingestCsvUpload,
+  mappings,
   recordEmbeddings,
   records,
   sourceRecordsRaw,
   SOURCE_INDEX_JOB,
+  SOURCE_SYNC_EXPIRE_IN_HOURS,
   SOURCE_SYNC_JOB,
+  SOURCE_SYNC_SINGLETON_MINUTES,
 } from '@data-gateway/core';
 import type { AppBindings, AppVariables } from '../app.js';
 import { requireScope } from '../middleware/auth.js';
@@ -78,7 +81,11 @@ export function sourceRoutes(deps: AppBindings) {
         workspaceId,
         fullSync: source.type === 'shopify' ? false : true,
       },
-      { singletonKey: `source-sync:${source.id}` },
+      {
+        singletonKey: `source-sync:${source.id}`,
+        singletonMinutes: SOURCE_SYNC_SINGLETON_MINUTES,
+        expireInHours: SOURCE_SYNC_EXPIRE_IN_HOURS,
+      },
     );
 
     return c.json({ jobId, status: 'queued' }, 202);
@@ -236,6 +243,14 @@ export function sourceRoutes(deps: AppBindings) {
       .select({ count: count() })
       .from(recordEmbeddings)
       .innerJoin(records, eq(recordEmbeddings.recordId, records.id))
+      .innerJoin(
+        mappings,
+        and(
+          eq(mappings.sourceId, records.sourceId),
+          eq(mappings.status, 'active'),
+          eq(recordEmbeddings.mappingVersion, mappings.version),
+        ),
+      )
       .where(eq(records.sourceId, sourceId));
 
     return c.json({

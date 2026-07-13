@@ -6,6 +6,10 @@ export const EVALS_RUN_JOB = 'evals.run';
 export const SHOPIFY_WEBHOOK_JOB = 'shopify.webhook';
 export const SHOPIFY_SYNC_SCHEDULED_JOB = 'shopify.sync.scheduled';
 export const HEALTH_HEARTBEAT_JOB = 'health.heartbeat';
+export const QUERY_EMBEDDING_CACHE_PURGE_JOB = 'query.embedding_cache.purge';
+
+export const SOURCE_SYNC_EXPIRE_IN_HOURS = 2;
+export const SOURCE_SYNC_SINGLETON_MINUTES = 10;
 
 /** Colas que deben existir antes de work/schedule/send (pg-boss v10). */
 export const ALL_JOB_QUEUES = [
@@ -17,6 +21,7 @@ export const ALL_JOB_QUEUES = [
   SHOPIFY_WEBHOOK_JOB,
   SHOPIFY_SYNC_SCHEDULED_JOB,
   HEALTH_HEARTBEAT_JOB,
+  QUERY_EMBEDDING_CACHE_PURGE_JOB,
 ] as const;
 
 export type SourceSyncJobData = {

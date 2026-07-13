@@ -10,6 +10,9 @@ const boss = new PgBoss({
   schema: 'pgboss',
   // Supabase session pooler: 15 conexiones totales entre api y worker.
   max: 5,
+  // Archive was ballooning (~547MB); keep history short.
+  archiveCompletedAfterSeconds: 3_600,
+  deleteAfterDays: 2,
 });
 
 let shuttingDown = false;

@@ -17,6 +17,14 @@ export const apiEnvSchema = z.object({
   OPENROUTER_API_KEY: z.string().optional(),
   EMBEDDING_MODEL: z.string().default('qwen/qwen3-embedding-8b'),
   EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(1024),
+  EMBEDDING_SOFT_DEADLINE_MS: z.coerce.number().int().positive().default(1_500),
+  EMBEDDING_HARD_TIMEOUT_MS: z.coerce.number().int().positive().default(3_000),
+  EMBEDDING_CIRCUIT_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(5),
+  EMBEDDING_CIRCUIT_RECOVERY_MS: z.coerce.number().int().positive().default(30_000),
+  ENABLE_QUERY_SYNONYM_EXPANSION: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
   LLM_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b:free'),
   USE_MOCK_PROVIDERS: z
     .enum(['true', 'false'])

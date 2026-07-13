@@ -50,6 +50,13 @@
       "when": 1781066000000,
       "tag": "0006_gateway_rls_role",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783800000000,
+      "tag": "0007_query_embedding_cache",
+      "breakpoints": true
     }
   ]
 }

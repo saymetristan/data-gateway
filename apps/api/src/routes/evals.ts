@@ -4,6 +4,7 @@ import {
   createEvalCaseSchema,
   createEvalSet,
   createEvalSetSchema,
+  deleteEvalCase,
   GatewayError,
   getEvalRunForWorkspace,
   getEvalSetWithCases,
@@ -113,6 +114,17 @@ export function evalRoutes(deps: AppBindings) {
     );
   });
 
+  routes.delete('/sets/:id/cases/:caseId', requireScope('evals:write'), async (c) => {
+    const db = c.get('db');
+    const workspaceId = c.get('workspaceId');
+    const evalSetId = evalSetIdParam(c.req.param('id'));
+    const evalCaseId = evalCaseIdParam(c.req.param('caseId'));
+
+    await deleteEvalCase(db, workspaceId, evalSetId, evalCaseId);
+
+    return c.body(null, 204);
+  });
+
   routes.post('/run', requireScope('evals:write'), async (c) => {
     const body: unknown = await c.req.json();
     const parsed = runEvalSetSchema.safeParse(body);
@@ -159,6 +171,13 @@ export function evalRoutes(deps: AppBindings) {
 function evalSetIdParam(value: string | undefined): string {
   if (!value) {
     throw GatewayError.validation('Missing eval set id');
+  }
+  return value;
+}
+
+function evalCaseIdParam(value: string | undefined): string {
+  if (!value) {
+    throw GatewayError.validation('Missing eval case id');
   }
   return value;
 }

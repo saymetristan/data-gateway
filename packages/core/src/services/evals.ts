@@ -112,6 +112,26 @@ export async function createEvalCase(
   return created;
 }
 
+export async function deleteEvalCase(
+  db: Database,
+  workspaceId: string,
+  evalSetId: string,
+  evalCaseId: string,
+) {
+  const evalSet = await getEvalSetForWorkspace(db, workspaceId, evalSetId);
+
+  const [deleted] = await db
+    .delete(evalCases)
+    .where(and(eq(evalCases.id, evalCaseId), eq(evalCases.evalSetId, evalSet.id)))
+    .returning();
+
+  if (!deleted) {
+    throw GatewayError.notFound('Eval case not found');
+  }
+
+  return deleted;
+}
+
 export async function listEvalSets(db: Database, workspaceId: string) {
   return db.select().from(evalSets).where(eq(evalSets.workspaceId, workspaceId));
 }
