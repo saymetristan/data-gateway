@@ -29,6 +29,7 @@
           "concepts/architecture",
           "concepts/source-maturity",
           "concepts/semantic-mapping",
+          "concepts/ranking-and-preferences",
           "concepts/evals-quality-gate",
           "concepts/tools-and-query",
           "concepts/security"

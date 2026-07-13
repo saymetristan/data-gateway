@@ -20,6 +20,8 @@ Cuando la búsqueda retorna resultados válidos:
   "data": {
     "results": [ ... ],
     "applied_filters": [ ... ],
+    "applied_preferences": [ ... ],
+    "query_type": "hybrid_search",
     "confidence": 0.85
   },
   "toolName": "search_product",
@@ -28,6 +30,7 @@ Cuando la búsqueda retorna resultados válidos:
 }
 ```
 
+`applied_preferences` solo aparece cuando hubo boosts blandos (NL con `inferredBehavior: "prefer"`, args `prefer_*`, o `preferences` en el request). Ver [Ranking y Preferencias](/concepts/ranking-and-preferences).
 ## Formato cuando faltan datos (Búsqueda vacía)
 
 El Gateway es capaz de instruir proactivamente al agente cuando una búsqueda no produjo resultados, modificando el `status` e incluyendo el campo `nextQuestion` para darle instrucciones al LLM sobre cómo pedirle más detalles al usuario humano.

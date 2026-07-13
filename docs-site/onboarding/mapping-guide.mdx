@@ -72,10 +72,12 @@ Prepara un archivo `mapping.json`. [Revisa los Conceptos de Mapeo](/concepts/sem
 
 En este ejemplo:
 - Creamos la entidad `product`. En el MCP se creará la herramienta `search_product`.
-- `title` es `searchable`: Si el agente busca "camisa azul", esta columna será fundamental.
-- `price` es `filterable`: El agente podrá pasar un parámetro explícito si el usuario le pide "camisas por menos de $100".
-- `stock` es `visible` pero no buscable.
-- `defaultFilters`: Se asegura de que el agente nunca verá productos con inventario cero.
+- `title` es `searchable` con peso `A`: domina el ranking léxico.
+- `category` es `filterable` + `inferredBehavior: "prefer"`: en NL prioriza sin excluir; el agente también puede usar `prefer_category` o el arg duro `category`.
+- `price` es `filterable`: parámetro explícito para rangos.
+- `defaultFilters`: el agente nunca verá stock ≤ 0.
+
+Guía completa de filter vs prefer vs search: [Ranking y Preferencias](/concepts/ranking-and-preferences).
 
 ## 2. Aplicar el Mapping
 
@@ -88,17 +90,22 @@ curl -X POST "https://data.whaapy.com/sources/{source_id}/mapping" \
   -d @mapping.json
 ```
 
-La fuente pasará al estado `mapped`.
+La fuente pasará al estado `mapped` (nueva versión activa).
 
 ## 3. Indexar los datos
 
-Para que el mapeo tome efecto, debemos pedirle al Gateway que regenere el índice de búsqueda y calcule los vectores de embeddings utilizando la regla que indicaste en `embeddingTextTemplate`.
+Para que el mapeo tome efecto —incluidos `searchWeight`, `cardinality: many` y el texto searchable— regenera el índice:
 
 ```bash
 curl -X POST "https://data.whaapy.com/sources/{source_id}/index" \
   -H "Authorization: Bearer $WORKSPACE_KEY"
 ```
 
-Dependiendo de la cantidad de registros, este proceso puede tomar algunos segundos o minutos. Cuando termine, el estado de tu fuente será `indexed`.
+Dependiendo del volumen, tarda segundos o minutos. Al terminar, el estado será `indexed`.
 
-El siguiente paso es someter tu índice a pruebas mediante el [Checklist de Activación](/onboarding/activation-checklist).
+<Warning>
+  Cambiar `retrieval.synonyms`, `searchWeight` o qué campos son `searchable` exige reindex.
+  Solo regenera embeddings si cambió `embeddingTextTemplate` o los datos del template.
+</Warning>
+
+Siguiente: [Checklist de Activación](/onboarding/activation-checklist).

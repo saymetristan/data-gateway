@@ -1,11 +1,11 @@
 ---
-title: "Checklist de Activación"
-description: "Cómo escribir evals y marcar tu fuente como agent_ready."
+title: 'Checklist de Activación'
+description: 'Cómo escribir evals y marcar tu fuente como agent_ready.'
 ---
 
 # Activación y Evals
 
-El último paso para que tu fuente aparezca en el MCP es pasar exitosamente una batería de Evaluaciones (Evals). 
+El último paso para que tu fuente aparezca en el MCP es pasar exitosamente una batería de Evaluaciones (Evals).
 
 ## 1. Crear el Evaluation Set
 
@@ -63,8 +63,38 @@ curl -X POST "https://data.whaapy.com/evals/sets/{set_id}/cases" \
   }'
 ```
 
-Aserciones extra: `expectedTopIds`, `mustApplyPreferences`, `mustRankAbove`.
-La semántica filter/prefer/search se define en el mapping (`retrieval.inferredBehavior`).
+Aserciones disponibles:
+
+| Campo | Uso |
+| --- | --- |
+| `expectedExternalIds` | Precision@k sobre IDs de origen |
+| `expectedTopIds` | Orden exacto del top |
+| `mustRankAbove` | `{ higher, lower }` — ranking relativo |
+| `mustApplyFilters` | Filtros duros esperados |
+| `mustApplyPreferences` | Preferencias blandas esperadas |
+| `mustNotContainFields` | Anti-leak de sensibles |
+
+La semántica filter/prefer/search se define en el mapping (`retrieval.inferredBehavior`). Guía: [Ranking y Preferencias](/concepts/ranking-and-preferences).
+
+### Smoke eval para Shopify
+
+Antes de escribir casos semánticos más amplios, valida varios SKUs reales. Usa el ID externo de la variante, no el UUID interno del Gateway:
+
+```bash
+curl -X POST "https://data.whaapy.com/evals/sets/{set_id}/cases" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "SKU-REAL-001",
+    "expectedExternalIds": ["shopify_variant_id"],
+    "mustApplyFilters": [
+      { "field": "sku", "op": "eq", "value": "SKU-REAL-001" }
+    ],
+    "mustNotContainFields": ["cost"]
+  }'
+```
+
+Este caso comprueba simultáneamente recuperación, extracción del filtro exacto y protección de un campo sensible. Repite el patrón con al menos tres SKUs distintos.
 
 Crea entre 10 y 20 casos para tener una red de seguridad razonable.
 
@@ -88,17 +118,57 @@ curl -X POST "https://data.whaapy.com/evals/run" \
   }'
 ```
 
-Si el porcentaje final cumple o supera tu `threshold` y no hubo violaciones de campos sensibles, tu fuente avanzará automáticamente al estado `validated`.
+La respuesta devuelve un `runId`. El run es asíncrono; consulta su estado hasta que sea `completed` o `failed`:
+
+```bash
+export RUN_ID="{run_id}"
+
+curl "https://data.whaapy.com/evals/runs/$RUN_ID" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+Revisa como mínimo:
+
+- `metrics.score` igual o superior al `threshold`
+- `metrics.casesPassed` y `metrics.casesTotal`
+- `metrics.precisionAtK`
+- `metrics.filterAccuracy`
+- `metrics.sensitiveLeaks` igual a `0`
+- `failed` vacío o con fallos entendidos y corregidos
+
+Ejemplo de métricas de un smoke eval aprobado:
+
+```json
+{
+  "status": "completed",
+  "metrics": {
+    "score": 1,
+    "casesTotal": 3,
+    "casesPassed": 3,
+    "precisionAtK": 1,
+    "filterAccuracy": 1,
+    "sensitiveLeaks": 0
+  },
+  "failed": []
+}
+```
+
+Si el resultado cumple el `threshold` y no hubo violaciones de campos sensibles, la fuente avanzará automáticamente a `validated`.
 
 ## 4. Activación Final
 
 Llama al endpoint final de activación. **Este endpoint fallará si el estado no es `validated`.**
 
 ```bash
-curl -X POST "https://data.whaapy.com/sources/{source_id}/activate" \
+export SOURCE_ID="{source_id}"
+
+curl -X POST "https://data.whaapy.com/sources/$SOURCE_ID/activate" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+
+curl "https://data.whaapy.com/sources/$SOURCE_ID/status" \
   -H "Authorization: Bearer $WORKSPACE_KEY"
 ```
 
-¡Felicidades! La fuente se marca como **`agent_ready`**.
+La verificación final debe devolver `maturityStatus: "agent_ready"` y conteos de `records` y `embeddings` mayores que cero.
 
 Todas sus herramientas declaradas (`search_product`, etc.) ahora aparecerán cuando tu cliente MCP interrogue la lista de herramientas. Procede a la sección de [Integración MCP](/mcp/overview) para empezar a consultarla.

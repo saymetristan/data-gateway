@@ -13,6 +13,7 @@ En lugar de que un LLM tenga acceso crudo a tu base de datos y pueda cometer err
 
 - **Consultas sin SQL en el agente:** Los agentes de IA no necesitan conocer tu esquema de base de datos ni generar código. Simplemente llaman a herramientas como `search_product` o `check_availability_order`.
 - **Determinismo y seguridad:** El gateway filtra y busca basándose en reglas que tú defines. Nunca usa un LLM para crear las consultas directamente a tu DB de producción.
+- **Ranking por negocio:** En el mapping decides si un campo (colección, categoría, marca…) **filtra**, **prioriza** o solo aporta texto. Sin hardcodes de vertical.
 - **Campos protegidos:** El mapeo semántico te permite ocultar campos sensibles que nunca deben ser expuestos al agente, aunque existan en la base de datos de origen.
 - **Evals como compuerta de calidad:** Ninguna herramienta se activa para los agentes si no ha superado pruebas predefinidas (evaluaciones) que tú diseñas para asegurar resultados precisos.
 - **Protocolo MCP nativo:** Exponemos las herramientas siguiendo el **Model Context Protocol (MCP)**, siendo 100% compatibles con Whaapy, Claude Desktop, Cursor y cualquier orquestador moderno.

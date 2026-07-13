@@ -17,15 +17,26 @@ Cuando el agente de IA llama a la herramienta `search_product(query="camiseta ro
 
 Un **Evaluation Set** contiene múltiples preguntas típicas de tu negocio (**Cases**).
 
-Para cada caso (query), tú defines los `expectedExternalIds` (los IDs de origen que sabes que son correctos para esa pregunta). Adicionalmente, puedes requerir que ciertos filtros se apliquen o que ciertos campos no se revelen.
+Para cada caso (query), defines aserciones. Al menos una es obligatoria:
 
-Si un case quedó mal definido, puedes borrarlo con `DELETE /evals/sets/:id/cases/:caseId` y volverlo a crear antes de ejecutar el run. Los runs usan los cases actuales del set.
+| Aserción | Efecto |
+| --- | --- |
+| `expectedExternalIds` | Los IDs de origen deben aparecer en el top-k (precision@k) |
+| `expectedTopIds` | Orden exacto del prefijo de resultados |
+| `mustRankAbove` | `{ "higher": "id-a", "lower": "id-b" }` — a debe salir antes que b |
+| `mustApplyFilters` | El run debió aplicar esos filtros duros |
+| `mustApplyPreferences` | El run debió aplicar esas preferencias blandas |
+| `mustNotContainFields` | Ningún resultado puede filtrar campos sensibles |
+
+Si un case quedó mal definido, bórralo con `DELETE /evals/sets/:id/cases/:caseId` y vuelve a crearlo antes del run.
+
+Para ranking (filtro vs preferencia), ver [Ranking y Preferencias](/concepts/ranking-and-preferences).
 
 ### Ejemplo de flujo
-1. Envías una batería de 20 consultas típicas de tus clientes a través de la API.
-2. El Gateway corre estas consultas con su motor.
-3. Se compara si los IDs retornados coinciden con los esperados.
-4. Obtienes un porcentaje de efectividad. Si supera tu **umbral (threshold)** (por ej. `0.8` o 80%), el set es aprobado.
+1. Envías una batería de consultas típicas de tus clientes.
+2. El Gateway corre el motor híbrido + rescore.
+3. Se comparan IDs, filtros, preferencias y ranking.
+4. Obtienes un porcentaje de efectividad. Si supera tu **umbral (threshold)** (ej. `0.8`), el set aprueba.
 
 ## Activación segura
 

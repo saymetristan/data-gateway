@@ -1,6 +1,6 @@
 ---
-title: "Onboarding: Shopify"
-description: "Conecta tu tienda y mantén sincronizado tu inventario en tiempo real."
+title: 'Onboarding: Shopify'
+description: 'Conecta tu tienda y mantén sincronizado tu inventario en tiempo real.'
 ---
 
 # Conexión con Shopify
@@ -9,42 +9,152 @@ La integración con Shopify utiliza credenciales de aplicación nativa. El Gatew
 
 ## 1. Crear aplicación en Shopify
 
-En el panel de tu tienda Shopify, crea una Custom App y configúrala para que provea credenciales del tipo **Client Credentials**. Asegúrate de otorgarle al menos los siguientes "Admin API access scopes":
+En el panel de tu tienda Shopify, crea una Custom App y configúrala para que provea credenciales del tipo **Client Credentials**. Este es el flujo recomendado para aplicaciones nuevas; el Gateway intercambia estas credenciales por tokens Admin API de corta duración.
+
+Asegúrate de otorgarle al menos los siguientes "Admin API access scopes":
 
 - `read_products`
 - `read_inventory`
 
-Necesitas recolectar tres valores desde Shopify:
+Necesitas recolectar:
+
+- **Shop domain**, siempre con formato `mi-tienda.myshopify.com`
 - **Client ID**
 - **Client Secret**
-- **Webhook Secret** (Se utiliza para validar las firmas de los webhooks que envía Shopify).
+- **Webhook Secret** (opcional, utilizado para validar las firmas de los webhooks)
+
+<Warning>
+  No pegues credenciales reales en tickets, documentación o comandos guardados en el historial. Usa
+  variables de entorno y rota cualquier secreto que haya quedado expuesto.
+</Warning>
 
 ## 2. Crear la fuente en el Data Gateway
 
 ```bash
 export WORKSPACE_KEY="dgw_live_tu_api_key_aqui"
+export SHOPIFY_SHOP_DOMAIN="mi-tienda.myshopify.com"
+export SHOPIFY_CLIENT_ID="tu_client_id"
+export SHOPIFY_CLIENT_SECRET="tu_client_secret"
+export SHOPIFY_WEBHOOK_SECRET=""
 
+jq -n \
+  --arg domain "$SHOPIFY_SHOP_DOMAIN" \
+  --arg clientId "$SHOPIFY_CLIENT_ID" \
+  --arg clientSecret "$SHOPIFY_CLIENT_SECRET" \
+  --arg webhookSecret "$SHOPIFY_WEBHOOK_SECRET" \
+  '{
+    type: "shopify",
+    name: "Mi Tienda Shopify",
+    config: {
+      shopDomain: $domain,
+      clientId: $clientId,
+      clientSecret: $clientSecret
+    }
+  }
+  | if $webhookSecret != ""
+    then .config.webhookSecret = $webhookSecret
+    else .
+    end' |
 curl -X POST "https://data.whaapy.com/sources" \
   -H "Authorization: Bearer $WORKSPACE_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "type": "shopify",
-    "name": "Mi Tienda Shopify",
-    "config": {
-      "shopDomain": "mi-tienda.myshopify.com",
-      "clientId": "tu_client_id",
-      "clientSecret": "tu_client_secret",
-      "webhookSecret": "tu_webhook_secret"
-    }
-  }'
+  --data-binary @-
 ```
 
+Guarda el `id` de la respuesta como `SOURCE_ID`.
+
 ### ¿Qué ocurre en el fondo?
+
 El Data Gateway:
+
 1. Normaliza tu dominio (ej. `mi-tienda.myshopify.com`).
 2. Usa el ID y el Secret para obtener tokens de corta duración dinámicos, validando que el acceso es correcto.
 3. Cifra tus credenciales.
 4. Encola la sincronización inicial de productos.
-5. Inscribe de manera automática los webhooks (`products/create`, `products/update`, `products/delete`) apuntando al Gateway para reflejar cambios en tu catálogo casi en tiempo real.
+5. Si el Gateway tiene una URL pública configurada, inscribe los webhooks (`products/create`, `products/update`, `products/delete`) para reflejar cambios casi en tiempo real. Cuando proporcionas un Webhook Secret, lo utiliza para validar sus firmas.
 
-Una vez que la sincronización termina, tu fuente estará en el estado de `profiled` y lista para que subas tu [Mapeo Semántico](/onboarding/mapping-guide).
+## 3. Esperar la sincronización y revisar el perfil
+
+La creación de la fuente es asíncrona. Consulta su estado hasta que alcance `profiled`:
+
+```bash
+export SOURCE_ID="{source_id}"
+
+curl "https://data.whaapy.com/sources/$SOURCE_ID/status" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+Una sincronización correcta debe mostrar registros en `counts.raw`. Después revisa las tablas y columnas detectadas:
+
+```bash
+curl "https://data.whaapy.com/sources/$SOURCE_ID/profile" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+Shopify normalmente produce las tablas `products`, `variants` y `collections`. Para búsquedas de catálogo, el mapping suele declarar una entidad con `sourceTable: "variants"` y exponer campos como `sku`, `productTitle`, `price`, `inventoryQuantity`, `available`, `productUrl` y `collections`.
+
+`collections` y `tags` se indexan como **arrays**. En el mapping conviene:
+
+```json
+{
+  "name": "collections",
+  "sourceColumn": "collections",
+  "type": "json",
+  "aliases": ["colección", "colecciones"],
+  "searchable": true,
+  "filterable": true,
+  "retrieval": {
+    "cardinality": "many",
+    "match": "contains",
+    "inferredBehavior": "prefer",
+    "boost": 0.3,
+    "searchWeight": "B"
+  }
+}
+```
+
+Así `"colección Verano"` prioriza sin excluir, y un hard filter `contains` funciona aunque el producto esté en varias colecciones. Ver [Ranking y Preferencias](/concepts/ranking-and-preferences).
+
+Continúa con la guía de [Mapeo Semántico](/onboarding/mapping-guide). No subas un mapping genérico sin comprobar primero que sus `sourceTable` y `sourceColumn` existen en el perfil.
+
+## 4. Indexar el catálogo
+
+Después de subir el mapping:
+
+```bash
+curl -X POST "https://data.whaapy.com/sources/$SOURCE_ID/index" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+El endpoint devuelve un `jobId`. Consulta nuevamente `/sources/$SOURCE_ID/status` hasta obtener:
+
+```json
+{
+  "maturityStatus": "indexed",
+  "counts": {
+    "raw": 69,
+    "records": 43,
+    "embeddings": 43
+  }
+}
+```
+
+Los números son ilustrativos. Lo importante es que `records` y `embeddings` sean mayores que cero y correspondan a las entidades definidas en el mapping.
+
+<Note>
+  El estado puede permanecer temporalmente en `mapped` aunque el job ya esté en cola. La indexación
+  y la generación de embeddings se ejecutan de forma asíncrona.
+</Note>
+
+## 5. Validar y activar
+
+Usa SKUs o IDs reales del catálogo para crear evals de recuperación exacta. Incluye aserciones de filtros, preferencias de ranking y campos sensibles. La fuente solo podrá activarse después de alcanzar `validated`.
+
+Sigue el [Checklist de Activación](/onboarding/activation-checklist). Para diseñar filter vs preferencia por colección, ver [Ranking y Preferencias](/concepts/ranking-and-preferences).
+
+## Diagnóstico rápido
+
+- **Shopify rechaza las credenciales:** confirma el dominio `.myshopify.com`, Client ID, Client Secret y scopes `read_products`/`read_inventory`.
+- **`counts.raw` es cero:** la sincronización no recibió productos visibles para la app o todavía no terminó.
+- **`counts.raw` tiene datos pero `records` es cero:** el `sourceTable` del mapping no coincide con `products`, `variants` o `collections`.
+- **La fuente está `indexed` pero no se puede activar:** faltan evals aprobados; `POST /sources/:id/activate` requiere estado `validated`.

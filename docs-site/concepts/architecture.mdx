@@ -35,9 +35,11 @@ Cuando creas una fuente de datos, el flujo interno se compone de varias fases au
 
 ## Flujo de consulta (Query Path)
 
-Cuando el agente llama a una herramienta MCP, sucede lo siguiente en el motor de búsqueda:
+Cuando el agente llama a una herramienta MCP (o usas `POST /query`), el motor hace:
 
-1. **Extracción de Filtros:** Si el agente envió argumentos determinísticos (ej. `precio < 100`), se aplican estrictamente en SQL. No interviene un LLM para generarlos.
-2. **Búsqueda Híbrida:** Se ejecuta de forma concurrente una búsqueda por texto completo (Full-Text Search) y una búsqueda por similitud vectorial (HNSW), combinando los resultados usando Reciprocal Rank Fusion (RRF).
-3. **Cálculo de Confianza:** Se asigna un puntaje (Confidence) al resultado basándose en las señales de recuperación, dándole al agente un indicador determinístico de qué tan precisa fue la búsqueda.
-4. **Respuesta Tipada:** Se filtran los campos marcados como `sensitive` y se envía la carga final formateada al agente.
+1. **Extracción:** Args MCP / `filters` / `preferences` del request, más matches NL según el mapping (`filter` \| `prefer` \| `search`).
+2. **Búsqueda híbrida:** FTS (con pesos A–D y sinónimos del mapping) + ANN vectorial en paralelo; fusión con RRF (pesos configurables por entidad).
+3. **Rescore:** Boosts blandos por preferencias, con tope para que no dominen el ranking.
+4. **Confianza + shaping:** Score determinístico; se ocultan campos `sensitive` antes de responder.
+
+Detalle: [Ranking y Preferencias](/concepts/ranking-and-preferences).
