@@ -277,17 +277,37 @@ function extractStringFilterMatches(
     .filter((value) => value !== null)
     .map((value) => String(value));
 
+  // Profile may still store legacy CSV for multi-value fields — expand to atoms.
+  const expandedValues =
+    field.retrieval?.cardinality === 'many'
+      ? [
+          ...new Set(
+            stringValues.flatMap((value) =>
+              value.includes(',')
+                ? value.split(',').map((part) => part.trim()).filter(Boolean)
+                : [value],
+            ),
+          ),
+        ]
+      : stringValues;
+
   const matches: StringFilterMatch[] = [];
   const normalizedQuery = normalizeText(query);
   const hintSpans = findFieldHintSpans(query, field);
   const op = defaultMatchOp(field);
 
   for (const hintSpan of hintSpans) {
-    const explicit = extractExplicitStringMatch(query, hintSpan, field.name, stringValues, op);
+    const explicit = extractExplicitStringMatch(
+      query,
+      hintSpan,
+      field.name,
+      expandedValues,
+      op,
+    );
     if (explicit) matches.push(explicit);
   }
 
-  for (const value of stringValues) {
+  for (const value of expandedValues) {
     const valueMatch = findValueMatch(normalizedQuery, value);
     if (!valueMatch) continue;
 
