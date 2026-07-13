@@ -1,9 +1,17 @@
-import type { NormalizedFilter } from '../schemas/query.js';
+import type { NormalizedFilter, QueryPreference } from '../schemas/query.js';
 import type { EvalCaseResult, EvalRunMetrics } from '../schemas/evals.js';
+
+export type RankAboveAssertion = {
+  higher: string;
+  lower: string;
+};
 
 export type EvalCaseAssertions = {
   expectedExternalIds?: string[];
+  expectedTopIds?: string[];
+  mustRankAbove?: RankAboveAssertion[];
   mustApplyFilters?: NormalizedFilter[];
+  mustApplyPreferences?: QueryPreference[];
   mustNotContainFields?: string[];
 };
 
@@ -12,6 +20,7 @@ export type EvalCaseExecution = {
   query: string;
   resultExternalIds: string[];
   appliedFilters: NormalizedFilter[];
+  appliedPreferences: QueryPreference[];
   resultData: Record<string, unknown>[];
   latencyMs: number;
   limit: number;
@@ -36,10 +45,50 @@ export function evaluateCase(
     }
   }
 
+  if (assertions.expectedTopIds?.length) {
+    const top = execution.resultExternalIds.slice(0, assertions.expectedTopIds.length);
+    const mismatch = assertions.expectedTopIds.some((id, index) => top[index] !== id);
+    if (mismatch) {
+      reasons.push(
+        `expectedTopIds [${assertions.expectedTopIds.join(', ')}] != [${top.join(', ')}]`,
+      );
+    }
+  }
+
+  if (assertions.mustRankAbove?.length) {
+    for (const pair of assertions.mustRankAbove) {
+      const higherIndex = execution.resultExternalIds.indexOf(pair.higher);
+      const lowerIndex = execution.resultExternalIds.indexOf(pair.lower);
+      if (higherIndex < 0) {
+        reasons.push(`mustRankAbove missing higher id ${pair.higher}`);
+        continue;
+      }
+      if (lowerIndex < 0) {
+        reasons.push(`mustRankAbove missing lower id ${pair.lower}`);
+        continue;
+      }
+      if (higherIndex >= lowerIndex) {
+        reasons.push(
+          `mustRankAbove failed: ${pair.higher} (idx ${String(higherIndex)}) should rank above ${pair.lower} (idx ${String(lowerIndex)})`,
+        );
+      }
+    }
+  }
+
   if (assertions.mustApplyFilters?.length) {
     for (const required of assertions.mustApplyFilters) {
       if (!filterMatches(required, execution.appliedFilters)) {
         reasons.push(`missing filter ${required.field} ${required.op} ${String(required.value)}`);
+      }
+    }
+  }
+
+  if (assertions.mustApplyPreferences?.length) {
+    for (const required of assertions.mustApplyPreferences) {
+      if (!preferenceMatches(required, execution.appliedPreferences)) {
+        reasons.push(
+          `missing preference ${required.field} ${required.op} ${String(required.value)}`,
+        );
       }
     }
   }
@@ -77,6 +126,18 @@ export function filterMatches(
       filter.field === required.field &&
       filter.op === required.op &&
       valuesEqual(filter.value, required.value),
+  );
+}
+
+export function preferenceMatches(
+  required: QueryPreference,
+  applied: QueryPreference[],
+): boolean {
+  return applied.some(
+    (preference) =>
+      preference.field === required.field &&
+      preference.op === required.op &&
+      valuesEqual(preference.value, required.value),
   );
 }
 

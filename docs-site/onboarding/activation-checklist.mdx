@@ -47,7 +47,24 @@ curl -X POST "https://data.whaapy.com/evals/sets/{set_id}/cases" \
     "expectedExternalIds": ["SKU-005"],
     "mustNotContainFields": ["internal_margin", "supplier_cost"]
   }'
+
+# Caso 3: ranking configurable (preferencia vs filtro)
+curl -X POST "https://data.whaapy.com/evals/sets/{set_id}/cases" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "colección Verano",
+    "mustApplyPreferences": [
+      { "field": "collections", "op": "contains", "value": "Verano" }
+    ],
+    "mustRankAbove": [
+      { "higher": "SKU-VERANO-1", "lower": "SKU-OTRO-1" }
+    ]
+  }'
 ```
+
+Aserciones extra: `expectedTopIds`, `mustApplyPreferences`, `mustRankAbove`.
+La semántica filter/prefer/search se define en el mapping (`retrieval.inferredBehavior`).
 
 Crea entre 10 y 20 casos para tener una red de seguridad razonable.
 

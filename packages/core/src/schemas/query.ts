@@ -1,6 +1,17 @@
 import { z } from 'zod';
 
-export const filterOpSchema = z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in']);
+export const filterOpSchema = z.enum([
+  'eq',
+  'neq',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'in',
+  'contains',
+  'containsAny',
+  'containsAll',
+]);
 
 export const filterScalarSchema = z.union([z.string(), z.number(), z.boolean()]);
 
@@ -10,10 +21,23 @@ export const normalizedFilterSchema = z.object({
   value: z.union([filterScalarSchema, z.array(filterScalarSchema)]),
 });
 
+export const queryPreferenceSchema = z.object({
+  field: z.string().min(1),
+  op: filterOpSchema.default('contains'),
+  value: z.union([filterScalarSchema, z.array(filterScalarSchema)]),
+  boost: z.number().min(0).max(1).optional(),
+});
+
+/** Legacy shorthand: { field: value } still accepted. */
+const legacyFiltersSchema = z.record(
+  z.union([filterScalarSchema, z.array(filterScalarSchema)]),
+);
+
 export const queryRequestSchema = z.object({
   entity: z.string().min(1).optional(),
   query: z.string().min(1),
-  filters: z.record(z.union([filterScalarSchema, z.array(filterScalarSchema)])).optional(),
+  filters: z.union([legacyFiltersSchema, z.array(normalizedFilterSchema)]).optional(),
+  preferences: z.array(queryPreferenceSchema).optional(),
   limit: z.coerce.number().int().positive().max(50).default(10),
   sourceId: z.string().uuid().optional(),
   useLlmFallback: z.boolean().optional().default(false),
@@ -31,6 +55,7 @@ export const queryResultSchema = z.object({
 export const queryResponseSchema = z.object({
   results: z.array(queryResultSchema),
   applied_filters: z.array(normalizedFilterSchema),
+  applied_preferences: z.array(queryPreferenceSchema).optional(),
   query_type: queryTypeSchema,
   confidence: z.number().min(0).max(1),
   sources_used: z.array(z.string().uuid()),
@@ -39,7 +64,20 @@ export const queryResponseSchema = z.object({
 
 export type FilterOp = z.infer<typeof filterOpSchema>;
 export type NormalizedFilter = z.infer<typeof normalizedFilterSchema>;
+export type QueryPreference = z.infer<typeof queryPreferenceSchema>;
 export type QueryRequest = z.infer<typeof queryRequestSchema>;
 export type QueryType = z.infer<typeof queryTypeSchema>;
 export type QueryResult = z.infer<typeof queryResultSchema>;
 export type QueryResponse = z.infer<typeof queryResponseSchema>;
+
+export function normalizeRequestFilters(
+  filters: QueryRequest['filters'],
+): NormalizedFilter[] {
+  if (!filters) return [];
+  if (Array.isArray(filters)) return filters;
+  return Object.entries(filters).map(([field, value]) => ({
+    field,
+    op: Array.isArray(value) ? 'in' : 'eq',
+    value,
+  }));
+}

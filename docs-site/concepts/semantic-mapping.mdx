@@ -34,6 +34,59 @@ Por cada columna que desees integrar, declaras un campo con sus atributos de vis
 | `filterable` | `true` si se permite al agente filtrar por este campo estrictamente (ej. `price < 100`). |
 | `visible` | `true` por defecto. Si es `false`, el agente nunca lo verá en las respuestas. |
 | `sensitive` | `true` si el campo es confidencial (ej. costos, datos personales). Un campo sensible **no puede** ser `searchable` ni `filterable`. |
+| `retrieval` | Política opcional de ranking/extracción NL (ver abajo). |
+
+### Política de retrieval por campo
+
+```json
+"retrieval": {
+  "cardinality": "many",
+  "match": "contains",
+  "inferredBehavior": "prefer",
+  "boost": 0.3,
+  "searchWeight": "B"
+}
+```
+
+- `cardinality`: `one` | `many` — arrays canónicos (no CSV) cuando es `many`.
+- `match`: `eq` | `contains` | `containsAny` | `containsAll`.
+- `inferredBehavior`: qué hacer si el campo se detecta en lenguaje natural:
+  - `filter` → filtro duro
+  - `prefer` → preferencia blanda (prioriza sin excluir)
+  - `search` → se queda en texto libre
+- `boost`: peso del soft preference (0–1).
+- `searchWeight`: tier léxico PostgreSQL `A`–`D` (`A` más importante).
+
+### Preferencias en el request
+
+```json
+{
+  "query": "tela antimancha",
+  "filters": [{ "field": "available", "op": "eq", "value": true }],
+  "preferences": [
+    { "field": "collections", "op": "contains", "value": "Verano", "boost": 0.3 }
+  ]
+}
+```
+
+- `filters`: excluye lo que no cumple.
+- `preferences`: reordena candidatos después de RRF; no excluye.
+
+### Sinónimos y RRF por negocio
+
+En la entidad:
+
+```json
+"retrieval": {
+  "synonyms": {
+    "version": "v1",
+    "entries": { "vinipiel": ["piel sintetica", "ecocuero"] }
+  },
+  "rrf": { "lexicalWeight": 1, "vectorWeight": 1.1 }
+}
+```
+
+Los sinónimos viven en el mapping del workspace (no hay diccionario global hardcodeado).
 
 ### Filtros por Defecto (Default Filters)
 

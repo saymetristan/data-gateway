@@ -203,18 +203,60 @@ function buildSearchTool(input: CompileToolsInput): ToolDefinition | null {
     }
 
     const enumValues = buildEnumValues(column);
-    properties[target.name] = enumValues
-      ? {
+    const retrieval = target.retrieval;
+    const match = retrieval?.match ?? (retrieval?.cardinality === 'many' ? 'contains' : 'eq');
+    const asPreference = retrieval?.inferredBehavior === 'prefer';
+    const isMany = retrieval?.cardinality === 'many';
+    const boost = retrieval?.boost;
+    const gatewayMeta = {
+      match,
+      asPreference: false,
+      ...(boost !== undefined ? { boost } : {}),
+    };
+
+    if (isMany) {
+      properties[target.name] = {
+        type: 'array',
+        items: {
           type: 'string',
-          enum: enumValues,
-          title: target.filterLabel,
-          description: describeEnumTarget(target, column, enumValues),
-        }
-      : {
-          type: 'string',
-          title: target.filterLabel,
-          description: describeEnumTarget(target, column, []),
-        };
+          ...(enumValues ? { enum: enumValues } : {}),
+        },
+        title: target.filterLabel,
+        description: describeEnumTarget(target, column, enumValues ?? []),
+        'x-gateway': gatewayMeta,
+      };
+    } else {
+      properties[target.name] = {
+        type: 'string',
+        ...(enumValues ? { enum: enumValues } : {}),
+        title: target.filterLabel,
+        description: describeEnumTarget(target, column, enumValues ?? []),
+        'x-gateway': gatewayMeta,
+      };
+    }
+
+    if (asPreference) {
+      properties[`prefer_${target.name}`] = {
+        type: isMany ? 'array' : 'string',
+        ...(isMany
+          ? {
+              items: {
+                type: 'string',
+                ...(enumValues ? { enum: enumValues } : {}),
+              },
+            }
+          : enumValues
+            ? { enum: enumValues }
+            : {}),
+        title: `Preferir ${target.filterLabel}`,
+        description: `Prioriza resultados con este ${target.filterLabel} sin excluir otros.`,
+        'x-gateway': {
+          match,
+          asPreference: true,
+          ...(boost !== undefined ? { boost } : {}),
+        },
+      };
+    }
   }
 
   const entitySlug = slugifyToolName(input.entity.entity);

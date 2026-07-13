@@ -44,6 +44,16 @@ export const toolInvokeResponseSchema = z.union([
         value: z.unknown(),
       }),
     ),
+    applied_preferences: z
+      .array(
+        z.object({
+          field: z.string(),
+          op: z.string(),
+          value: z.unknown(),
+          boost: z.number().optional(),
+        }),
+      )
+      .optional(),
     query_type: z.enum(['filter_only', 'lexical', 'hybrid_search']),
     confidence: z.number(),
     sources_used: z.array(z.string().uuid()),

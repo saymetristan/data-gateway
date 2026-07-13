@@ -29,10 +29,24 @@ Prepara un archivo `mapping.json`. [Revisa los Conceptos de Mapeo](/concepts/sem
             "identifier": true
           },
           {
+            "name": "category",
+            "sourceColumn": "category",
+            "type": "string",
+            "searchable": true,
+            "filterable": true,
+            "aliases": ["categoría", "coleccion"],
+            "retrieval": {
+              "inferredBehavior": "prefer",
+              "boost": 0.3,
+              "searchWeight": "B"
+            }
+          },
+          {
             "name": "title",
             "sourceColumn": "name",
             "type": "string",
-            "searchable": true
+            "searchable": true,
+            "retrieval": { "searchWeight": "A" }
           },
           {
             "name": "price",

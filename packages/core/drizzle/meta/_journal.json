@@ -57,6 +57,13 @@
       "when": 1783800000000,
       "tag": "0007_query_embedding_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783900000000,
+      "tag": "0008_ranking_policy",
+      "breakpoints": true
     }
   ]
 }

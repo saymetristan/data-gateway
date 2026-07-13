@@ -29,8 +29,20 @@ export const records = pgTable(
     sourceRecordHash: text('source_record_hash').notNull().default(''),
     mappingVersion: integer('mapping_version').notNull().default(0),
     searchSource: text('search_source').notNull().default(''),
+    searchWeights: jsonb('search_weights').notNull().default({}),
     searchText: tsvector('search_text').generatedAlwaysAs(
-      sql`to_tsvector('es_unaccent', public.f_unaccent(coalesce(search_source, '')))`,
+      sql`CASE
+        WHEN coalesce(search_weights->>'A', '') = ''
+         AND coalesce(search_weights->>'B', '') = ''
+         AND coalesce(search_weights->>'C', '') = ''
+         AND coalesce(search_weights->>'D', '') = ''
+        THEN to_tsvector('es_unaccent', public.f_unaccent(coalesce(search_source, '')))
+        ELSE
+          setweight(to_tsvector('es_unaccent', public.f_unaccent(coalesce(search_weights->>'A', ''))), 'A')
+          || setweight(to_tsvector('es_unaccent', public.f_unaccent(coalesce(search_weights->>'B', ''))), 'B')
+          || setweight(to_tsvector('es_unaccent', public.f_unaccent(coalesce(search_weights->>'C', ''))), 'C')
+          || setweight(to_tsvector('es_unaccent', public.f_unaccent(coalesce(search_weights->>'D', ''))), 'D')
+      END`,
     ),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

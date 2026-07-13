@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { normalizedFilterSchema } from './query.js';
+import { normalizedFilterSchema, queryPreferenceSchema } from './query.js';
 
 export const createEvalSetSchema = z.object({
   name: z.string().min(1).max(255),
@@ -8,17 +8,28 @@ export const createEvalSetSchema = z.object({
   sourceId: z.string().uuid().optional(),
 });
 
+export const mustRankAboveSchema = z.object({
+  higher: z.string().min(1),
+  lower: z.string().min(1),
+});
+
 export const createEvalCaseSchema = z
   .object({
     query: z.string().min(1),
     expectedExternalIds: z.array(z.string().min(1)).optional(),
+    expectedTopIds: z.array(z.string().min(1)).optional(),
+    mustRankAbove: z.array(mustRankAboveSchema).optional(),
     mustApplyFilters: z.array(normalizedFilterSchema).optional(),
+    mustApplyPreferences: z.array(queryPreferenceSchema).optional(),
     mustNotContainFields: z.array(z.string().min(1)).optional(),
   })
   .refine(
     (value) =>
       (value.expectedExternalIds?.length ?? 0) > 0 ||
+      (value.expectedTopIds?.length ?? 0) > 0 ||
+      (value.mustRankAbove?.length ?? 0) > 0 ||
       (value.mustApplyFilters?.length ?? 0) > 0 ||
+      (value.mustApplyPreferences?.length ?? 0) > 0 ||
       (value.mustNotContainFields?.length ?? 0) > 0,
     { message: 'At least one assertion is required' },
   );

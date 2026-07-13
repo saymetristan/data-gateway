@@ -1,32 +1,15 @@
 /**
- * Versioned synonym dictionary for fabric/textile domain (Bayon).
+ * Expand free-text with a mapping-provided synonym dictionary.
  * Expansion is applied before lexical search only — never changes embedding text.
- */
-export const FABRIC_SYNONYM_DICT_VERSION = 'fabrics-v1';
-
-const FABRIC_SYNONYMS: Record<string, string[]> = {
-  vinipiel: ['piel sintetica', 'cuero sintetico', 'vinilo'],
-  visillo: ['translucido', 'cortina ligera', 'tergal'],
-  retapizar: ['tapiceria', 'tapizar'],
-  tapiceria: ['retapizar', 'tapizar'],
-  blackout: ['oscurante', 'bloqueo luz'],
-  lino: ['linen'],
-  terciopelo: ['velvet'],
-  microfibra: ['micro fibra'],
-  jacquard: ['jacar'],
-  pana: ['corduroy'],
-};
-
-/**
- * Expand free-text with domain synonyms. Deterministic, no LLM.
- * Only expands whole-word matches of dictionary keys.
  */
 export function expandQueryWithSynonyms(
   text: string,
-  dictionary: Record<string, string[]> = FABRIC_SYNONYMS,
+  dictionary: Record<string, string[]> = {},
 ): { expanded: string; addedTerms: string[] } {
   const trimmed = text.trim();
-  if (!trimmed) return { expanded: trimmed, addedTerms: [] };
+  if (!trimmed || Object.keys(dictionary).length === 0) {
+    return { expanded: trimmed, addedTerms: [] };
+  }
 
   const lower = trimmed.toLowerCase();
   const added = new Set<string>();

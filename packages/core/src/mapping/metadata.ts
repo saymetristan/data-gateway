@@ -1,4 +1,5 @@
-import type { MappingEntity, MappingField } from '../schemas/mapping.js';
+import type { MappingEntity, MappingField, MappingFieldRetrieval } from '../schemas/mapping.js';
+import { getFieldRetrieval } from '../schemas/mapping.js';
 import type { ProfileColumn, SourceProfileDocument } from '../schemas/profile.js';
 
 export type FilterableTarget = {
@@ -12,6 +13,7 @@ export type FilterableTarget = {
   aliases: string[];
   identifier?: boolean | undefined;
   fromRule?: boolean | undefined;
+  retrieval?: MappingFieldRetrieval | undefined;
 };
 
 export function entityLabel(entity: MappingEntity): string {
@@ -52,6 +54,7 @@ export function getFilterableTargets(entity: MappingEntity): FilterableTarget[] 
       ...(field.unit ? { unit: field.unit } : {}),
       aliases: field.aliases ?? [],
       ...(field.identifier ? { identifier: true } : {}),
+      retrieval: getFieldRetrieval(field),
     });
     seen.add(field.name);
   }
@@ -71,7 +74,7 @@ export function getFilterableTargets(entity: MappingEntity): FilterableTarget[] 
     seen.add(rule.field);
   }
 
-  for (const filter of entity.defaultFilters) {
+  for (const filter of entity.defaultFilters ?? []) {
     if (seen.has(filter.field)) continue;
     const inferredType =
       typeof filter.value === 'boolean'
@@ -127,5 +130,14 @@ export function describeTarget(target: FilterableTarget): string {
   const parts = [target.description ?? `Filtrar por ${target.filterLabel}`];
   if (target.unit) parts.push(`Unidad: ${target.unit}.`);
   if (target.aliases.length > 0) parts.push(`Alias: ${target.aliases.join(', ')}.`);
+  const behavior = target.retrieval?.inferredBehavior;
+  if (behavior === 'prefer') {
+    parts.push('En lenguaje natural se usa como preferencia (prioriza sin excluir).');
+  } else if (behavior === 'search') {
+    parts.push('En lenguaje natural permanece como texto libre de búsqueda.');
+  }
+  if (target.retrieval?.cardinality === 'many') {
+    parts.push('Acepta múltiples valores (contains/overlap).');
+  }
   return parts.join(' ');
 }

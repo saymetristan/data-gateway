@@ -121,13 +121,18 @@ Define por campo:
 
 | Flag         | Efecto en tools                                                 |
 | ------------ | --------------------------------------------------------------- |
-| `searchable` | Entra al índice semántico                                       |
+| `searchable` | Entra al índice léxico (con `searchWeight` A–D)                 |
 | `filterable` | Se expone como parámetro en `search_*` / `check_availability_*` |
 | `sensitive`  | Nunca sale en respuestas                                        |
+| `retrieval`  | Política NL: `filter` / `prefer` / `search`, `match`, `boost`   |
 
 
 Ajusta el mapping a la ontología del negocio (no uses el auto-mapping del script para prod).
 
+- Ecommerce genérico: `fixtures/shopify-mapping.json`
+- Bayon (sinónimos textiles + colección prefer): `fixtures/bayon-mapping.json`
+
+Cambios de `retrieval.synonyms` / pesos obligan nueva versión de mapping + reindex.
 ## 4. Index, evals, activate
 
 ```bash

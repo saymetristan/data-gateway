@@ -1,0 +1,28 @@
+[
+  {
+    "query": "colección Verano",
+    "mustApplyPreferences": [
+      { "field": "collections", "op": "contains", "value": "Verano" }
+    ]
+  },
+  {
+    "query": "tela antimancha",
+    "filtersNote": "Hard filter via request filters, not NL",
+    "mustApplyFilters": [
+      { "field": "collections", "op": "contains", "value": "Verano" }
+    ],
+    "expectedExternalIds": ["sku-verano-1"]
+  },
+  {
+    "query": "vinipiel para sofá",
+    "mustRankAbove": [
+      { "higher": "sku-vinipiel-1", "lower": "sku-algodon-1" }
+    ]
+  },
+  {
+    "query": "producto multi colección",
+    "mustApplyPreferences": [
+      { "field": "collections", "op": "contains", "value": "Ofertas" }
+    ]
+  }
+]

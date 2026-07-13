@@ -102,6 +102,9 @@ export async function createEvalCase(
       expectedResultIds: input.expectedExternalIds ?? null,
       mustApplyFilters: input.mustApplyFilters ?? null,
       mustNotContainFields: input.mustNotContainFields ?? null,
+      mustRankAbove: input.mustRankAbove ?? null,
+      expectedTopIds: input.expectedTopIds ?? null,
+      mustApplyPreferences: input.mustApplyPreferences ?? null,
     })
     .returning();
 
@@ -273,8 +276,22 @@ export async function runEvalSet(
       if (evalCase.expectedResultIds) {
         assertions.expectedExternalIds = evalCase.expectedResultIds as string[];
       }
+      if (evalCase.expectedTopIds) {
+        assertions.expectedTopIds = evalCase.expectedTopIds as string[];
+      }
+      if (evalCase.mustRankAbove) {
+        assertions.mustRankAbove = evalCase.mustRankAbove as Array<{
+          higher: string;
+          lower: string;
+        }>;
+      }
       if (evalCase.mustApplyFilters) {
         assertions.mustApplyFilters = evalCase.mustApplyFilters as NormalizedFilter[];
+      }
+      if (evalCase.mustApplyPreferences) {
+        assertions.mustApplyPreferences = evalCase.mustApplyPreferences as NonNullable<
+          EvalCaseAssertions['mustApplyPreferences']
+        >;
       }
       if (evalCase.mustNotContainFields) {
         assertions.mustNotContainFields = evalCase.mustNotContainFields as string[];
@@ -285,6 +302,7 @@ export async function runEvalSet(
         query: evalCase.query,
         resultExternalIds: externalIds,
         appliedFilters: response.applied_filters,
+        appliedPreferences: response.applied_preferences ?? [],
         resultData: response.results.map((result) => result.data),
         latencyMs,
         limit: 10,
@@ -591,6 +609,9 @@ export async function seedEvalCasesFromFixture(
       expectedResultIds: evalCase.expectedExternalIds ?? null,
       mustApplyFilters: evalCase.mustApplyFilters ?? null,
       mustNotContainFields: evalCase.mustNotContainFields ?? null,
+      mustRankAbove: evalCase.mustRankAbove ?? null,
+      expectedTopIds: evalCase.expectedTopIds ?? null,
+      mustApplyPreferences: evalCase.mustApplyPreferences ?? null,
     });
   }
 }

@@ -1,6 +1,7 @@
-import type { MappingEntity } from '../schemas/mapping.js';
+import type { MappingEntity, MappingField } from '../schemas/mapping.js';
+import { getFieldRetrieval } from '../schemas/mapping.js';
 import type { ProfileColumn, SourceProfileDocument } from '../schemas/profile.js';
-import type { NormalizedFilter } from '../schemas/query.js';
+import type { FilterOp, NormalizedFilter, QueryPreference } from '../schemas/query.js';
 import type { FilterableTarget } from '../mapping/metadata.js';
 import { getFilterableTargets, profileColumnsForEntity } from '../mapping/metadata.js';
 import { escapeRegex, normalizeText, parseSpanishNumber } from './text-utils.js';
@@ -11,8 +12,25 @@ export type ExtractFiltersInput = {
   profile: SourceProfileDocument;
 };
 
+export type ExtractedFieldMatch = {
+  field: string;
+  op: FilterOp;
+  value: string | number | boolean | Array<string | number | boolean>;
+  origin: 'explicit' | 'implicit';
+  span: { start: number; end: number };
+};
+
 export type ExtractFiltersResult = {
+  /** @deprecated Prefer `matches` + resolveExtractedMatches */
   filters: NormalizedFilter[];
+  matches: ExtractedFieldMatch[];
+  unresolvedText: string;
+  warnings: string[];
+};
+
+export type ResolveMatchesResult = {
+  filters: NormalizedFilter[];
+  preferences: QueryPreference[];
   unresolvedText: string;
   warnings: string[];
 };
@@ -31,6 +49,7 @@ type NumericRangeMatch = {
 
 type StringFilterMatch = {
   field: string;
+  op: FilterOp;
   value: string;
   span: { start: number; end: number };
   explicit: boolean;
@@ -39,7 +58,7 @@ type StringFilterMatch = {
 
 export function extractFilters(input: ExtractFiltersInput): ExtractFiltersResult {
   const warnings: string[] = [];
-  const filters: NormalizedFilter[] = [];
+  const matches: ExtractedFieldMatch[] = [];
   const consumed: Array<{ start: number; end: number }> = [];
 
   const filterableFields = getFilterableTargets(input.entity);
@@ -51,7 +70,13 @@ export function extractFilters(input: ExtractFiltersInput): ExtractFiltersResult
     if (target) {
       const numeric = extractNumericRanges(input.query);
       for (const match of numeric) {
-        filters.push({ field: target.name, op: match.op, value: match.value });
+        matches.push({
+          field: target.name,
+          op: match.op,
+          value: match.value,
+          origin: 'explicit',
+          span: match.span,
+        });
         consumed.push(match.span);
       }
     }
@@ -59,7 +84,7 @@ export function extractFilters(input: ExtractFiltersInput): ExtractFiltersResult
 
   const stringMatches: StringFilterMatch[] = [];
   for (const field of filterableFields) {
-    if (field.type === 'string') {
+    if (field.type === 'string' || field.type === 'json') {
       const column = field.sourceColumn
         ? profileColumns.get(field.sourceColumn)
         : profileColumns.get(field.name);
@@ -69,7 +94,13 @@ export function extractFilters(input: ExtractFiltersInput): ExtractFiltersResult
     if (field.type === 'boolean') {
       const boolMatch = extractBooleanFilter(input.query, field);
       if (boolMatch) {
-        filters.push({ field: field.name, op: 'eq', value: boolMatch.value });
+        matches.push({
+          field: field.name,
+          op: 'eq',
+          value: boolMatch.value,
+          origin: 'explicit',
+          span: boolMatch.span,
+        });
         consumed.push(boolMatch.span);
       }
     }
@@ -77,12 +108,85 @@ export function extractFilters(input: ExtractFiltersInput): ExtractFiltersResult
 
   const selectedStringMatches = selectStringFilterMatches(stringMatches, warnings);
   for (const match of selectedStringMatches) {
-    filters.push({ field: match.field, op: 'eq', value: match.value });
+    matches.push({
+      field: match.field,
+      op: match.op,
+      value: match.value,
+      origin: match.explicit ? 'explicit' : 'implicit',
+      span: match.span,
+    });
     consumed.push(match.span);
   }
 
+  const filters: NormalizedFilter[] = matches.map((match) => ({
+    field: match.field,
+    op: match.op,
+    value: match.value,
+  }));
+
   const unresolvedText = removeConsumedSpans(input.query, consumed);
-  return { filters, unresolvedText, warnings };
+  return { filters, matches, unresolvedText, warnings };
+}
+
+/**
+ * Convert NL matches into hard filters / soft preferences according to mapping policy.
+ * `search` keeps the matched span in free text.
+ */
+export function resolveExtractedMatches(input: {
+  query: string;
+  matches: ExtractedFieldMatch[];
+  fieldsByName: Map<string, MappingField>;
+  extraWarnings?: string[];
+}): ResolveMatchesResult {
+  const warnings = [...(input.extraWarnings ?? [])];
+  const filters: NormalizedFilter[] = [];
+  const preferences: QueryPreference[] = [];
+  const consumed: Array<{ start: number; end: number }> = [];
+
+  for (const match of input.matches) {
+    const field = input.fieldsByName.get(match.field);
+    const retrieval = field ? getFieldRetrieval(field) : undefined;
+    const behavior = retrieval?.inferredBehavior ?? 'filter';
+    const op = match.op;
+
+    if (behavior === 'search') {
+      continue;
+    }
+
+    if (behavior === 'prefer') {
+      preferences.push({
+        field: match.field,
+        op,
+        value: match.value,
+        boost: retrieval?.boost,
+      });
+      consumed.push(match.span);
+      continue;
+    }
+
+    filters.push({
+      field: match.field,
+      op,
+      value: match.value,
+    });
+    consumed.push(match.span);
+  }
+
+  return {
+    filters,
+    preferences,
+    unresolvedText: removeConsumedSpans(input.query, consumed),
+    warnings,
+  };
+}
+
+function defaultMatchOp(field: FilterableTarget): FilterOp {
+  const match = field.retrieval?.match;
+  if (match === 'contains' || match === 'containsAny' || match === 'containsAll') {
+    return match;
+  }
+  if (field.retrieval?.cardinality === 'many') return 'contains';
+  return 'eq';
 }
 
 function extractNumericRanges(query: string): NumericRangeMatch[] {
@@ -176,9 +280,10 @@ function extractStringFilterMatches(
   const matches: StringFilterMatch[] = [];
   const normalizedQuery = normalizeText(query);
   const hintSpans = findFieldHintSpans(query, field);
+  const op = defaultMatchOp(field);
 
   for (const hintSpan of hintSpans) {
-    const explicit = extractExplicitStringMatch(query, hintSpan, field.name, stringValues);
+    const explicit = extractExplicitStringMatch(query, hintSpan, field.name, stringValues, op);
     if (explicit) matches.push(explicit);
   }
 
@@ -188,6 +293,7 @@ function extractStringFilterMatches(
 
     matches.push({
       field: field.name,
+      op,
       value,
       span: valueMatch.span,
       explicit: false,
@@ -203,6 +309,7 @@ function extractExplicitStringMatch(
   hintSpan: { start: number; end: number },
   field: string,
   values: string[],
+  op: FilterOp,
 ): StringFilterMatch | null {
   const tail = query.slice(hintSpan.end, Math.min(query.length, hintSpan.end + 80));
   const normalizedTail = normalizeText(tail).replace(/^(?:\s|de|del|la|el|con|en|:|-)+/i, '');
@@ -244,6 +351,7 @@ function extractExplicitStringMatch(
   if (best) {
     return {
       field,
+      op,
       value: best.value,
       span: {
         start: Math.min(hintSpan.start, best.valueSpan.start),
@@ -264,6 +372,7 @@ function extractExplicitStringMatch(
   };
   return {
     field,
+    op,
     value: rawValue,
     span: { start: hintSpan.start, end: hintSpan.end + rawSpan.end },
     explicit: true,

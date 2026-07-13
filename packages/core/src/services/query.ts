@@ -17,12 +17,14 @@ import type { MappingDocument, MappingEntity, MappingField } from '../schemas/ma
 import type { SourceProfileDocument } from '../schemas/profile.js';
 import type {
   NormalizedFilter,
+  QueryPreference,
   QueryRequest,
   QueryResponse,
   QueryType,
 } from '../schemas/query.js';
+import { normalizeRequestFilters } from '../schemas/query.js';
 import { computeConfidence } from '../query/confidence.js';
-import { extractFilters } from '../query/extract-filters.js';
+import { extractFilters, resolveExtractedMatches } from '../query/extract-filters.js';
 import { extractFiltersWithLlm } from '../query/llm-fallback.js';
 import {
   fuseLexicalAndVector,
@@ -32,11 +34,10 @@ import {
   vectorSearchForSource,
   type RawRecordRow,
 } from '../query/retrieval.js';
+import { applyPreferenceRescore, summarizeSignals } from '../query/rescore.js';
 import { shapeAppliedFilters, shapeRecordData } from '../query/shaping.js';
-import {
-  expandQueryWithSynonyms,
-  FABRIC_SYNONYM_DICT_VERSION,
-} from '../query/synonyms.js';
+import { expandQueryWithSynonyms } from '../query/synonyms.js';
+import { getFieldRetrieval } from '../schemas/mapping.js';
 import { getFilterableTargets } from '../mapping/metadata.js';
 import {
   buildQueryEmbeddingCacheHash,
@@ -83,8 +84,9 @@ export type QueryResilienceMetadata = {
   circuitState?: string;
   providerAttempts?: number;
   fallbackReason?: string;
-  synonymDictVersion?: string;
-  synonymTermsAdded?: string[];
+  synonymDictVersion?: string | undefined;
+  synonymTermsAdded?: string[] | undefined;
+  rankingSignals?: Array<{ id: string; matched: string[] }> | undefined;
   softDeadlineMs: number;
   hardTimeoutMs: number;
 };
@@ -101,10 +103,18 @@ type PreparedQuery = {
   sourceIds: string[];
   mappingVersionBySource: Map<string, number>;
   extractedFilters: NormalizedFilter[];
+  extractedPreferences: QueryPreference[];
   unresolvedText: string;
   safeFilters: NormalizedFilter[];
   appliedFilters: NormalizedFilter[];
+  appliedPreferences: QueryPreference[];
   filterableFields: Set<string>;
+  preferableFields: Set<string>;
+  fieldsByName: Map<string, MappingField>;
+  synonymDictionary: Record<string, string[]>;
+  synonymDictVersion?: string;
+  lexicalWeight: number;
+  vectorWeight: number;
   embeddingsAvailableBySource: Map<string, boolean>;
   warnings: string[];
 };
@@ -135,6 +145,7 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
   const warnings: string[] = [];
   let queryType: QueryType = 'filter_only';
   let appliedFilters: NormalizedFilter[] = [];
+  let appliedPreferences: QueryPreference[] = [];
   let resultsCount = 0;
   let confidence = 0;
   let errorMessage: string | undefined;
@@ -161,9 +172,11 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
     metadata.timings.prepareMs = Date.now() - prepareStarted;
     warnings.push(...prepared.warnings);
     appliedFilters = prepared.appliedFilters;
+    appliedPreferences = prepared.appliedPreferences;
 
     const unresolvedText = prepared.unresolvedText;
     const extractedFilters = [...prepared.extractedFilters];
+    const extractedPreferences = [...prepared.extractedPreferences];
 
     if (input.request.useLlmFallback && input.llmProvider && unresolvedText.trim()) {
       const primary = prepared.queryable[0];
@@ -184,7 +197,7 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
         const defaultFilters = collectDefaultFilters(prepared.queryable, input.request.entity);
         const mergedFilters = mergeFilters(
           [...extractedFilters, ...(input.presetFilters ?? [])],
-          requestFiltersToNormalized(input.request.filters),
+          normalizeRequestFilters(input.request.filters),
           defaultFilters,
         );
         const filterableFields = new Set(prepared.filterableFields);
@@ -208,11 +221,11 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
 
     const enableSynonyms = input.enableSynonymExpansion !== false;
     let searchText = unresolvedText.trim();
-    if (enableSynonyms && searchText) {
-      const expanded = expandQueryWithSynonyms(searchText);
+    if (enableSynonyms && searchText && Object.keys(prepared.synonymDictionary).length > 0) {
+      const expanded = expandQueryWithSynonyms(searchText, prepared.synonymDictionary);
       if (expanded.addedTerms.length > 0) {
         searchText = expanded.expanded;
-        metadata.synonymDictVersion = FABRIC_SYNONYM_DICT_VERSION;
+        metadata.synonymDictVersion = prepared.synonymDictVersion;
         metadata.synonymTermsAdded = expanded.addedTerms;
       }
     }
@@ -234,9 +247,14 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
           embeddingModel: input.embeddingProvider.model,
           filters: prepared.safeFilters,
           freeText: '',
-          limit: input.request.limit,
+          limit:
+            prepared.appliedPreferences.length > 0
+              ? Math.max(input.request.limit * 3, 30)
+              : input.request.limit,
           filterableFields: prepared.filterableFields,
           embeddingsAvailableBySource: prepared.embeddingsAvailableBySource,
+          lexicalWeight: prepared.lexicalWeight,
+          vectorWeight: prepared.vectorWeight,
         });
         metadata.timings.fusionMs = Date.now() - fusionStarted;
         return finalizeResponse({
@@ -246,8 +264,10 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
           queryType: retrieval.queryType,
           warnings: [...warnings, ...retrieval.warnings],
           extractedFilters,
+          extractedPreferences,
           unresolvedText,
           appliedFilters,
+          appliedPreferences,
           started,
           metadata,
         });
@@ -349,11 +369,16 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
           ? fuseLexicalAndVector({
               lexicalRows,
               vectorRows,
-              limit: input.request.limit,
+              limit: Math.max(input.request.limit * 3, 30),
+              lexicalWeight: prepared.lexicalWeight,
+              vectorWeight: prepared.vectorWeight,
             })
           : {
               queryType: 'lexical' as const,
-              hits: lexicalRowsToHits(lexicalRows, input.request.limit),
+              hits: lexicalRowsToHits(
+                lexicalRows,
+                Math.max(input.request.limit * 3, 30),
+              ),
               lexicalRanking: lexicalRows.map((row) => row.id),
               vectorRanking: [] as string[],
               warnings: [] as string[],
@@ -368,8 +393,10 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
         queryType: retrieval.queryType,
         warnings,
         extractedFilters,
+        extractedPreferences,
         unresolvedText,
         appliedFilters,
+        appliedPreferences,
         started,
         metadata,
       });
@@ -555,8 +582,10 @@ async function finalizeResponse(args: {
   queryType: QueryType;
   warnings: string[];
   extractedFilters: NormalizedFilter[];
+  extractedPreferences: QueryPreference[];
   unresolvedText: string;
   appliedFilters: NormalizedFilter[];
+  appliedPreferences: QueryPreference[];
   started: number;
   metadata: QueryResilienceMetadata;
 }): Promise<QueryResponse> {
@@ -567,14 +596,45 @@ async function finalizeResponse(args: {
     queryType,
     warnings,
     extractedFilters,
+    extractedPreferences,
     unresolvedText,
     appliedFilters,
+    appliedPreferences,
     started,
     metadata,
   } = args;
 
+  const rescored = applyPreferenceRescore(
+    retrievalHits.map((hit) => ({
+      id: hit.id,
+      score: hit.score,
+      data: hit.data,
+    })),
+    appliedPreferences,
+    prepared.fieldsByName,
+  );
+
+  const hitById = new Map(retrievalHits.map((hit) => [hit.id, hit]));
+  const rankedHits = rescored.hits
+    .slice(0, input.request.limit)
+    .map((item) => {
+      const original = hitById.get(item.id);
+      return {
+        id: item.id,
+        entity: original?.entity ?? '',
+        score: item.score,
+        data: item.data,
+        lexicalMatch: original?.lexicalMatch ?? false,
+      };
+    });
+
+  metadata.rankingSignals = summarizeSignals(
+    rescored.signalsById,
+    rankedHits.slice(0, 5).map((hit) => hit.id),
+  );
+
   const fieldMap = buildFieldMap(prepared.queryable);
-  const shapedResults = retrievalHits.map((hit) => ({
+  const shapedResults = rankedHits.map((hit) => ({
     id: hit.id,
     entity: hit.entity,
     score: hit.score,
@@ -582,11 +642,11 @@ async function finalizeResponse(args: {
   }));
 
   const confidence = computeConfidence({
-    rankedScores: retrievalHits.map((hit) => hit.score),
+    rankedScores: rankedHits.map((hit) => hit.score),
     requestedFilterCount:
-      extractedFilters.length + Object.keys(input.request.filters ?? {}).length,
+      extractedFilters.length + normalizeRequestFilters(input.request.filters).length,
     appliedFilterCount: appliedFilters.length,
-    topLexicalMatch: retrievalHits[0]?.lexicalMatch ?? false,
+    topLexicalMatch: rankedHits[0]?.lexicalMatch ?? false,
     resultsCount: shapedResults.length,
     limit: input.request.limit,
   });
@@ -596,6 +656,7 @@ async function finalizeResponse(args: {
   const payload: QueryResponse = {
     results: shapedResults,
     applied_filters: appliedFilters,
+    ...(appliedPreferences.length > 0 ? { applied_preferences: appliedPreferences } : {}),
     query_type: queryType,
     confidence,
     sources_used: prepared.sourceIds,
@@ -606,6 +667,7 @@ async function finalizeResponse(args: {
     rawQuery: input.request.query,
     structuredQuery: {
       extracted: extractedFilters,
+      preferences: extractedPreferences,
       unresolvedText,
       ...(input.logContext?.toolName ? { toolName: input.logContext.toolName } : {}),
       ...(input.logContext?.mappingVersion !== undefined
@@ -643,9 +705,11 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     queryable.map((source) => [source.id, source.mappingVersion]),
   );
 
-  const extractedFilters: NormalizedFilter[] = [];
-  let unresolvedText = input.request.query;
+  const allFields = collectAllFields(queryable, entityFilter);
+  const fieldsByName = new Map(allFields.map((field) => [field.name, field]));
 
+  const extractedMatches = [];
+  const extractWarnings: string[] = [];
   for (const source of queryable) {
     const entities = pickEntities(source.document, entityFilter);
     for (const entity of entities) {
@@ -654,18 +718,26 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
         entity,
         profile: source.profile,
       });
-      extractedFilters.push(...extracted.filters);
-      if (extracted.unresolvedText.length < unresolvedText.length) {
-        unresolvedText = extracted.unresolvedText;
-      }
-      warnings.push(...extracted.warnings);
+      extractedMatches.push(...extracted.matches);
+      extractWarnings.push(...extracted.warnings);
     }
   }
+
+  const resolved = resolveExtractedMatches({
+    query: input.request.query,
+    matches: extractedMatches,
+    fieldsByName,
+    extraWarnings: extractWarnings,
+  });
+  warnings.push(...resolved.warnings);
+
+  const extractedFilters = resolved.filters;
+  const unresolvedText = resolved.unresolvedText;
 
   const defaultFilters = collectDefaultFilters(queryable, entityFilter);
   const mergedFilters = mergeFilters(
     [...extractedFilters, ...(input.presetFilters ?? [])],
-    requestFiltersToNormalized(input.request.filters),
+    normalizeRequestFilters(input.request.filters),
     defaultFilters,
   );
 
@@ -677,11 +749,32 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     filterableFields.add(filter.field);
   }
   const safeFilters = mergedFilters.filter((filter) => {
+    if (isSensitiveField(fieldsByName.get(filter.field))) {
+      warnings.push(`Filter on sensitive field "${filter.field}" ignored`);
+      return false;
+    }
     if (filterableFields.has(filter.field)) return true;
     warnings.push(`Filter on non-filterable field "${filter.field}" ignored`);
     return false;
   });
-  const appliedFilters = shapeAppliedFilters(safeFilters, collectAllFields(queryable, entityFilter));
+  const appliedFilters = shapeAppliedFilters(safeFilters, allFields);
+
+  const preferableFields = collectPreferableFields(queryable, entityFilter);
+  const mappingSoftPreferences = collectSoftPreferences(queryable, entityFilter);
+  const requestPreferences = [
+    ...resolved.preferences,
+    ...(input.request.preferences ?? []),
+    ...mappingSoftPreferences,
+  ];
+  const appliedPreferences = sanitizePreferences(
+    requestPreferences,
+    preferableFields,
+    fieldsByName,
+    warnings,
+  );
+
+  const synonymConfig = collectSynonymDictionary(queryable, entityFilter);
+  const rrf = collectRrfWeights(queryable, entityFilter);
 
   const embeddingsAvailableBySource = await resolveEmbeddingsAvailability(
     db,
@@ -695,10 +788,18 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     sourceIds,
     mappingVersionBySource,
     extractedFilters,
+    extractedPreferences: resolved.preferences,
     unresolvedText,
     safeFilters,
     appliedFilters,
+    appliedPreferences,
     filterableFields,
+    preferableFields,
+    fieldsByName,
+    synonymDictionary: synonymConfig.entries,
+    ...(synonymConfig.version ? { synonymDictVersion: synonymConfig.version } : {}),
+    lexicalWeight: rrf.lexicalWeight,
+    vectorWeight: rrf.vectorWeight,
     embeddingsAvailableBySource,
     warnings,
   };
@@ -791,17 +892,6 @@ function pickEntities(document: MappingDocument, entity?: string): MappingEntity
   return document.entities;
 }
 
-function requestFiltersToNormalized(
-  filters: QueryRequest['filters'],
-): NormalizedFilter[] {
-  if (!filters) return [];
-  return Object.entries(filters).map(([field, value]) => ({
-    field,
-    op: Array.isArray(value) ? 'in' : 'eq',
-    value,
-  }));
-}
-
 function collectDefaultFilters(
   queryable: QueryableSource[],
   entity?: string,
@@ -809,7 +899,7 @@ function collectDefaultFilters(
   const defaults: NormalizedFilter[] = [];
   for (const source of queryable) {
     for (const entityDef of pickEntities(source.document, entity)) {
-      for (const filter of entityDef.defaultFilters) {
+      for (const filter of entityDef.defaultFilters ?? []) {
         defaults.push({
           field: filter.field,
           op: filter.op,
@@ -819,6 +909,64 @@ function collectDefaultFilters(
     }
   }
   return defaults;
+}
+
+function collectSoftPreferences(
+  queryable: QueryableSource[],
+  entity?: string,
+): QueryPreference[] {
+  const preferences: QueryPreference[] = [];
+  for (const source of queryable) {
+    for (const entityDef of pickEntities(source.document, entity)) {
+      for (const preference of entityDef.retrieval?.softPreferences ?? []) {
+        preferences.push({
+          field: preference.field,
+          op: preference.op,
+          value: preference.value,
+          boost: preference.boost,
+        });
+      }
+    }
+  }
+  return preferences;
+}
+
+function collectSynonymDictionary(
+  queryable: QueryableSource[],
+  entity?: string,
+): { version?: string; entries: Record<string, string[]> } {
+  const entries: Record<string, string[]> = {};
+  let version: string | undefined;
+  for (const source of queryable) {
+    for (const entityDef of pickEntities(source.document, entity)) {
+      const synonyms = entityDef.retrieval?.synonyms;
+      if (!synonyms) continue;
+      version = synonyms.version;
+      for (const [term, list] of Object.entries(synonyms.entries)) {
+        const existing = entries[term] ?? [];
+        entries[term] = [...new Set([...existing, ...list])];
+      }
+    }
+  }
+  return version ? { version, entries } : { entries };
+}
+
+function collectRrfWeights(
+  queryable: QueryableSource[],
+  entity?: string,
+): { lexicalWeight: number; vectorWeight: number } {
+  for (const source of queryable) {
+    for (const entityDef of pickEntities(source.document, entity)) {
+      const rrf = entityDef.retrieval?.rrf;
+      if (rrf) {
+        return {
+          lexicalWeight: rrf.lexicalWeight,
+          vectorWeight: rrf.vectorWeight,
+        };
+      }
+    }
+  }
+  return { lexicalWeight: 1, vectorWeight: 1.1 };
 }
 
 function collectFilterableFields(
@@ -834,6 +982,61 @@ function collectFilterableFields(
     }
   }
   return names;
+}
+
+function collectPreferableFields(
+  queryable: QueryableSource[],
+  entity?: string,
+): Set<string> {
+  const names = new Set<string>();
+  for (const source of queryable) {
+    for (const entityDef of pickEntities(source.document, entity)) {
+      for (const field of entityDef.fields) {
+        if (field.sensitive) continue;
+        if (field.filterable || getFieldRetrieval(field).inferredBehavior === 'prefer') {
+          names.add(field.name);
+        }
+      }
+    }
+  }
+  return names;
+}
+
+function sanitizePreferences(
+  preferences: QueryPreference[],
+  preferableFields: Set<string>,
+  fieldsByName: Map<string, MappingField>,
+  warnings: string[],
+): QueryPreference[] {
+  const sanitized: QueryPreference[] = [];
+  const seen = new Set<string>();
+  for (const preference of preferences) {
+    const key = `${preference.field}:${preference.op}:${JSON.stringify(preference.value)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const field = fieldsByName.get(preference.field);
+    if (isSensitiveField(field)) {
+      warnings.push(`Preference on sensitive field "${preference.field}" ignored`);
+      continue;
+    }
+    if (!preferableFields.has(preference.field)) {
+      warnings.push(`Preference on non-preferable field "${preference.field}" ignored`);
+      continue;
+    }
+    const retrieval = field ? getFieldRetrieval(field) : undefined;
+    sanitized.push({
+      field: preference.field,
+      op: preference.op,
+      value: preference.value,
+      boost: preference.boost ?? retrieval?.boost ?? 0.15,
+    });
+  }
+  return sanitized;
+}
+
+function isSensitiveField(field?: MappingField): boolean {
+  return Boolean(field?.sensitive);
 }
 
 function collectAllFields(

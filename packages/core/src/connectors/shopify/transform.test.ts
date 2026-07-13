@@ -34,6 +34,8 @@ describe('shopify transform', () => {
       ancho: '1.50 m',
       style: expect.any(String),
     });
+    expect(Array.isArray(variantPayload.collections)).toBe(true);
+    expect(Array.isArray(variantPayload.tags)).toBe(true);
   });
 
   it('canoniza dominios Shopify a myshopify.com exacto', () => {

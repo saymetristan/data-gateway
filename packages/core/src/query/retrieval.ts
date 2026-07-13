@@ -422,24 +422,126 @@ function buildFilterCondition(
   if (!allowedFields.has(filter.field)) return null;
 
   const fieldKey = filter.field.replace(/'/g, "''");
-  const jsonPath = sql.raw(`r.data->>'${fieldKey}'`);
+  const textPath = sql.raw(`r.data->>'${fieldKey}'`);
+  const jsonPath = sql.raw(`r.data->'${fieldKey}'`);
 
   switch (filter.op) {
-    case 'eq':
-      return sql`${jsonPath} = ${scalarToString(filter.value)}`;
+    case 'eq': {
+      const value = scalarToString(filter.value);
+      // Scalar equality OR membership in JSON array / CSV legacy.
+      return sql`(
+        ${textPath} = ${value}
+        OR (
+          jsonb_typeof(${jsonPath}) = 'array'
+          AND ${jsonPath} ? ${value}
+        )
+        OR (
+          jsonb_typeof(${jsonPath}) IS DISTINCT FROM 'array'
+          AND ${value} = ANY(
+            string_to_array(regexp_replace(coalesce(${textPath}, ''), '\s*,\s*', ',', 'g'), ',')
+          )
+        )
+      )`;
+    }
     case 'neq':
-      return sql`${jsonPath} <> ${scalarToString(filter.value)}`;
+      return sql`NOT (
+        ${textPath} = ${scalarToString(filter.value)}
+        OR (
+          jsonb_typeof(${jsonPath}) = 'array'
+          AND ${jsonPath} ? ${scalarToString(filter.value)}
+        )
+      )`;
     case 'gt':
-      return sql`(${jsonPath})::numeric > ${Number(filter.value)}`;
+      return sql`(${textPath})::numeric > ${Number(filter.value)}`;
     case 'gte':
-      return sql`(${jsonPath})::numeric >= ${Number(filter.value)}`;
+      return sql`(${textPath})::numeric >= ${Number(filter.value)}`;
     case 'lt':
-      return sql`(${jsonPath})::numeric < ${Number(filter.value)}`;
+      return sql`(${textPath})::numeric < ${Number(filter.value)}`;
     case 'lte':
-      return sql`(${jsonPath})::numeric <= ${Number(filter.value)}`;
+      return sql`(${textPath})::numeric <= ${Number(filter.value)}`;
     case 'in': {
       const values = Array.isArray(filter.value) ? filter.value : [filter.value];
-      return sql`${jsonPath} IN (${sql.join(values.map((value) => sql`${scalarToString(value)}`), sql`, `)})`;
+      const asText = values.map((value) => scalarToString(value));
+      return sql`(
+        ${textPath} IN (${sql.join(asText.map((value) => sql`${value}`), sql`, `)})
+        OR (
+          jsonb_typeof(${jsonPath}) = 'array'
+          AND ${jsonPath} ?| ARRAY[${sql.join(
+            asText.map((value) => sql`${value}`),
+            sql`, `,
+          )}]::text[]
+        )
+      )`;
+    }
+    case 'contains': {
+      const values = Array.isArray(filter.value) ? filter.value : [filter.value];
+      const asText = values.map((value) => scalarToString(value));
+      // All values must be present (array containment / CSV contains).
+      return sql`(
+        (
+          jsonb_typeof(${jsonPath}) = 'array'
+          AND ${jsonPath} ?& ARRAY[${sql.join(
+            asText.map((value) => sql`${value}`),
+            sql`, `,
+          )}]::text[]
+        )
+        OR (
+          jsonb_typeof(${jsonPath}) IS DISTINCT FROM 'array'
+          AND ${sql.join(
+            asText.map(
+              (value) =>
+                sql`${textPath} ILIKE ${'%' + value + '%'}`,
+            ),
+            sql` AND `,
+          )}
+        )
+      )`;
+    }
+    case 'containsAny': {
+      const values = Array.isArray(filter.value) ? filter.value : [filter.value];
+      const asText = values.map((value) => scalarToString(value));
+      return sql`(
+        (
+          jsonb_typeof(${jsonPath}) = 'array'
+          AND ${jsonPath} ?| ARRAY[${sql.join(
+            asText.map((value) => sql`${value}`),
+            sql`, `,
+          )}]::text[]
+        )
+        OR (
+          jsonb_typeof(${jsonPath}) IS DISTINCT FROM 'array'
+          AND ${sql.join(
+            asText.map(
+              (value) =>
+                sql`${textPath} ILIKE ${'%' + value + '%'}`,
+            ),
+            sql` OR `,
+          )}
+        )
+      )`;
+    }
+    case 'containsAll': {
+      const values = Array.isArray(filter.value) ? filter.value : [filter.value];
+      const asText = values.map((value) => scalarToString(value));
+      return sql`(
+        (
+          jsonb_typeof(${jsonPath}) = 'array'
+          AND ${jsonPath} ?& ARRAY[${sql.join(
+            asText.map((value) => sql`${value}`),
+            sql`, `,
+          )}]::text[]
+        )
+        OR (
+          jsonb_typeof(${jsonPath}) IS DISTINCT FROM 'array'
+          AND ${sql.join(
+            asText.map(
+              (value) =>
+                sql`${textPath} ILIKE ${'%' + value + '%'}`,
+            ),
+            sql` AND `,
+          )}
+        )
+      )`;
     }
     default:
       return null;

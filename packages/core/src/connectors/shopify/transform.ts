@@ -80,12 +80,15 @@ export function variantToRawPayload(
     productType: product.productType,
     imageUrl: variant.imageUrl ?? product.imageUrl,
     vendor: product.vendor,
-    tags: product.tags,
+    tags: product.tags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0),
     selectedOptions,
     attributes,
     productMetafields,
     variantMetafields,
-    collections: product.collectionTitles.join(', '),
+    collections: product.collectionTitles,
     updatedAt: variant.updatedAt,
   };
 }

@@ -128,6 +128,9 @@ async function invokeSearchTool(
     kind: 'search',
     results: response.results,
     applied_filters: response.applied_filters,
+    ...(response.applied_preferences
+      ? { applied_preferences: response.applied_preferences }
+      : {}),
     query_type: response.query_type,
     confidence: response.confidence,
     sources_used: response.sources_used,

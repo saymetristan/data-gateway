@@ -89,17 +89,21 @@ describe('CircuitBreaker', () => {
 });
 
 describe('expandQueryWithSynonyms', () => {
-  it('adds fabric synonyms without duplicating existing terms', () => {
-    const result = expandQueryWithSynonyms('vinipiel para retapizar');
+  const dictionary = {
+    vinipiel: ['piel sintetica', 'tapiceria'],
+    retapizar: ['tapiceria'],
+  };
+
+  it('adds mapping synonyms without duplicating existing terms', () => {
+    const result = expandQueryWithSynonyms('vinipiel para retapizar', dictionary);
     expect(result.addedTerms).toContain('piel sintetica');
     expect(result.addedTerms).toContain('tapiceria');
     expect(result.expanded).toContain('vinipiel para retapizar');
   });
 
-  it('is a no-op when no dictionary terms match', () => {
-    const result = expandQueryWithSynonyms('algodón orgánico');
-    expect(result.addedTerms).toEqual([]);
-    expect(result.expanded).toBe('algodón orgánico');
+  it('is a no-op when dictionary is empty or no terms match', () => {
+    expect(expandQueryWithSynonyms('algodón orgánico', dictionary).addedTerms).toEqual([]);
+    expect(expandQueryWithSynonyms('vinipiel', {}).addedTerms).toEqual([]);
   });
 });
 

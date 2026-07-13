@@ -52,7 +52,7 @@ export function validateMappingAgainstProfile(
 
     const fieldNames = new Set(entity.fields.map((field) => field.name));
     const ruleFieldNames = new Set(entity.rules.map((rule) => rule.field));
-    for (const filter of entity.defaultFilters) {
+    for (const filter of entity.defaultFilters ?? []) {
       if (!fieldNames.has(filter.field) && !ruleFieldNames.has(filter.field)) {
         throw GatewayError.unprocessable(
           `Default filter references unknown field "${filter.field}" in entity "${entity.entity}"`,

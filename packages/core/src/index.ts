@@ -55,3 +55,5 @@ export * from './mapping/metadata.js';
 export * from './utils/hash.js';
 export * from './services/query-embedding-cache.js';
 export * from './query/synonyms.js';
+export * from './query/rescore.js';
+export * from './query/weighted-search.js';

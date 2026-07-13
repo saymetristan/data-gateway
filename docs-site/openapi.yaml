@@ -12,6 +12,66 @@ components:
       type: http
       scheme: bearer
       bearerFormat: API Key
+  schemas:
+    NormalizedFilter:
+      type: object
+      required: [field, op, value]
+      properties:
+        field:
+          type: string
+        op:
+          type: string
+          enum: [eq, neq, gt, gte, lt, lte, in, contains, containsAny, containsAll]
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: array
+              items:
+                oneOf:
+                  - type: string
+                  - type: number
+                  - type: boolean
+    QueryPreference:
+      allOf:
+        - $ref: '#/components/schemas/NormalizedFilter'
+        - type: object
+          properties:
+            boost:
+              type: number
+              minimum: 0
+              maximum: 1
+    QueryResponse:
+      type: object
+      required: [results, applied_filters, query_type, confidence, sources_used, warnings]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+        applied_filters:
+          type: array
+          items:
+            $ref: '#/components/schemas/NormalizedFilter'
+        applied_preferences:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryPreference'
+        query_type:
+          type: string
+          enum: [filter_only, lexical, hybrid_search]
+        confidence:
+          type: number
+        sources_used:
+          type: array
+          items:
+            type: string
+            format: uuid
+        warnings:
+          type: array
+          items:
+            type: string
 security:
   - bearerAuth: []
 paths:
@@ -76,10 +136,32 @@ paths:
                 entity:
                   type: string
                 filters:
-                  type: object
+                  oneOf:
+                    - type: object
+                      additionalProperties: true
+                      description: Filtros legacy { campo: valor }
+                    - type: array
+                      items:
+                        $ref: '#/components/schemas/NormalizedFilter'
+                  description: Restricciones duras. Soporta eq/contains/containsAny/containsAll.
+                preferences:
+                  type: array
+                  description: Boosts blandos. Priorizan sin excluir.
+                  items:
+                    $ref: '#/components/schemas/QueryPreference'
+                sourceId:
+                  type: string
+                  format: uuid
+                useLlmFallback:
+                  type: boolean
+                  default: false
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
   /sources:
     post:
       summary: Crear Fuente (Source)
@@ -236,17 +318,38 @@ paths:
                   type: array
                   items:
                     type: string
-                mustApplyFilters:
+                expectedTopIds:
+                  type: array
+                  items:
+                    type: string
+                mustRankAbove:
                   type: array
                   items:
                     type: object
+                    required: [higher, lower]
+                    properties:
+                      higher:
+                        type: string
+                      lower:
+                        type: string
+                mustApplyFilters:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/NormalizedFilter'
+                mustApplyPreferences:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/QueryPreference'
                 mustNotContainFields:
                   type: array
                   items:
                     type: string
               anyOf:
                 - required: [expectedExternalIds]
+                - required: [expectedTopIds]
+                - required: [mustRankAbove]
                 - required: [mustApplyFilters]
+                - required: [mustApplyPreferences]
                 - required: [mustNotContainFields]
       responses:
         "201":

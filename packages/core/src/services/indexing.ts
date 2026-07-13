@@ -13,6 +13,7 @@ import {
   applyFieldMapping,
   applyRules,
   buildSearchSource,
+  buildWeightedSearchParts,
   findEntityForTable,
   parseSourceRecordParts,
   renderPromptTemplate,
@@ -93,11 +94,28 @@ export async function indexSource(
       }
 
       const autoRelationText = buildAutoRelationSearchText(entityDef, payload, relationIndex);
+      const weightedParts = buildWeightedSearchParts(data, entityDef.fields);
+      const relationBucket = [relationData.searchText, autoRelationText]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      if (relationBucket) {
+        weightedParts.D = [weightedParts.D, relationBucket].filter(Boolean).join(' ').trim();
+      }
       const searchSource = [
         buildSearchSource(data, entityDef.fields),
         relationData.searchText,
         autoRelationText,
-      ].filter(Boolean).join(' ').trim();
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      const searchWeights = {
+        A: weightedParts.A,
+        B: weightedParts.B,
+        C: weightedParts.C,
+        D: weightedParts.D,
+      };
       const dataHash = payloadHash(data);
 
       const [existing] = await db
@@ -105,6 +123,7 @@ export async function indexSource(
           id: records.id,
           mappingVersion: records.mappingVersion,
           searchSource: records.searchSource,
+          searchWeights: records.searchWeights,
           sourceRecordHash: records.sourceRecordHash,
         })
         .from(records)
@@ -121,6 +140,7 @@ export async function indexSource(
         existing !== undefined &&
         existing.mappingVersion === mapping.version &&
         existing.searchSource === searchSource &&
+        JSON.stringify(existing.searchWeights ?? {}) === JSON.stringify(searchWeights) &&
         existing.sourceRecordHash === dataHash;
       if (unchanged) continue;
 
@@ -135,6 +155,7 @@ export async function indexSource(
           sourceRecordHash: dataHash,
           mappingVersion: mapping.version,
           searchSource,
+          searchWeights,
         })
         .onConflictDoUpdate({
           target: [records.sourceId, records.entity, records.externalId],
@@ -143,10 +164,15 @@ export async function indexSource(
             sourceRecordHash: dataHash,
             mappingVersion: mapping.version,
             searchSource,
+            searchWeights,
             updatedAt: new Date(),
           },
         })
-        .returning({ id: records.id, mappingVersion: records.mappingVersion, searchSource: records.searchSource });
+        .returning({
+          id: records.id,
+          mappingVersion: records.mappingVersion,
+          searchSource: records.searchSource,
+        });
 
       if (!upserted) continue;
 

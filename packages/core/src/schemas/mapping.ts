@@ -2,6 +2,21 @@ import { z } from 'zod';
 
 export const mappingFieldTypeSchema = z.enum(['string', 'number', 'boolean', 'date', 'json']);
 
+export const fieldCardinalitySchema = z.enum(['one', 'many']);
+export const fieldMatchModeSchema = z.enum(['eq', 'contains', 'containsAny', 'containsAll']);
+export const inferredBehaviorSchema = z.enum(['filter', 'prefer', 'search']);
+export const searchWeightTierSchema = z.enum(['A', 'B', 'C', 'D']);
+
+export const mappingFieldRetrievalSchema = z.object({
+  cardinality: fieldCardinalitySchema.default('one'),
+  match: fieldMatchModeSchema.default('eq'),
+  inferredBehavior: inferredBehaviorSchema.default('filter'),
+  /** Soft boost when used as preference (0–1). */
+  boost: z.number().min(0).max(1).default(0.2),
+  /** Lexical weight tier for PostgreSQL setweight. */
+  searchWeight: searchWeightTierSchema.default('D'),
+});
+
 export const mappingFieldSchema = z
   .object({
     name: z.string().min(1),
@@ -18,10 +33,18 @@ export const mappingFieldSchema = z
     filterable: z.boolean().default(false),
     visible: z.boolean().default(true),
     sensitive: z.boolean().default(false),
+    retrieval: mappingFieldRetrievalSchema.optional(),
   })
   .refine((field) => !field.sensitive || (!field.searchable && !field.filterable), {
     message: 'Sensitive fields cannot be searchable or filterable',
-  });
+  })
+  .refine(
+    (field) =>
+      !field.retrieval ||
+      !field.sensitive ||
+      (field.retrieval.inferredBehavior === 'search' && field.retrieval.boost === 0),
+    { message: 'Sensitive fields cannot participate in retrieval boosts' },
+  );
 
 export const mappingRuleConditionSchema = z.object({
   column: z.string().min(1),
@@ -57,13 +80,14 @@ export const mappingRuleSchema = z
 
 export const mappingDefaultFilterSchema = z.object({
   field: z.string().min(1),
-  op: z.enum(['gt', 'gte', 'lt', 'lte', 'eq', 'neq', 'in']),
+  op: z.enum(['gt', 'gte', 'lt', 'lte', 'eq', 'neq', 'in', 'contains', 'containsAny', 'containsAll']),
   value: z.union([
     z.string(),
     z.number(),
     z.boolean(),
     z.array(z.union([z.string(), z.number(), z.boolean()])),
   ]),
+  scope: z.enum(['hard']).default('hard'),
 });
 
 export const mappingEnrichmentSchema = z.object({
@@ -92,6 +116,36 @@ export const mappingRelationAggregateSchema = z.object({
   visible: z.boolean().default(true),
 });
 
+export const mappingEntityRetrievalSchema = z.object({
+  synonyms: z
+    .object({
+      version: z.string().min(1),
+      entries: z.record(z.array(z.string().min(1))),
+    })
+    .optional(),
+  softPreferences: z
+    .array(
+      z.object({
+        field: z.string().min(1),
+        op: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'contains', 'containsAny', 'containsAll']),
+        value: z.union([
+          z.string(),
+          z.number(),
+          z.boolean(),
+          z.array(z.union([z.string(), z.number(), z.boolean()])),
+        ]),
+        boost: z.number().min(0).max(1).default(0.15),
+      }),
+    )
+    .default([]),
+  rrf: z
+    .object({
+      lexicalWeight: z.number().positive().default(1),
+      vectorWeight: z.number().positive().default(1.1),
+    })
+    .optional(),
+});
+
 export const mappingEntitySchema = z.object({
   entity: z.string().min(1),
   description: z.string().optional(),
@@ -106,6 +160,7 @@ export const mappingEntitySchema = z.object({
   defaultFilters: z.array(mappingDefaultFilterSchema).default([]),
   embeddingTextTemplate: z.string().min(1),
   enrichment: mappingEnrichmentSchema.optional(),
+  retrieval: mappingEntityRetrievalSchema.optional(),
 });
 
 export const mappingDocumentSchema = z.object({
@@ -116,21 +171,27 @@ type ParsedMappingField = z.infer<typeof mappingFieldSchema>;
 type ParsedMappingRule = z.infer<typeof mappingRuleSchema>;
 type ParsedMappingEntity = z.infer<typeof mappingEntitySchema>;
 
-export type MappingField = Omit<ParsedMappingField, 'aliases' | 'identifier'> & {
-  aliases?: string[];
-  identifier?: boolean;
+export type MappingFieldRetrieval = z.infer<typeof mappingFieldRetrievalSchema>;
+export type MappingEntityRetrieval = z.infer<typeof mappingEntityRetrievalSchema>;
+
+export type MappingField = Omit<ParsedMappingField, 'aliases' | 'identifier' | 'retrieval'> & {
+  aliases?: string[] | undefined;
+  identifier?: boolean | undefined;
+  retrieval?: MappingFieldRetrieval | undefined;
 };
 export type MappingRule = Omit<ParsedMappingRule, 'aliases'> & {
-  aliases?: string[];
+  aliases?: string[] | undefined;
 };
 export type MappingRelationAggregate = z.infer<typeof mappingRelationAggregateSchema>;
 export type MappingEntity = Omit<
   ParsedMappingEntity,
-  'fields' | 'rules' | 'relationAggregates'
+  'fields' | 'rules' | 'relationAggregates' | 'retrieval' | 'defaultFilters'
 > & {
   fields: MappingField[];
   rules: MappingRule[];
-  relationAggregates?: MappingRelationAggregate[];
+  relationAggregates?: MappingRelationAggregate[] | undefined;
+  defaultFilters?: z.infer<typeof mappingDefaultFilterSchema>[] | undefined;
+  retrieval?: MappingEntityRetrieval | undefined;
 };
 export type MappingDocument = Omit<z.infer<typeof mappingDocumentSchema>, 'entities'> & {
   entities: MappingEntity[];
@@ -141,3 +202,13 @@ export const createMappingSchema = z.object({
 });
 
 export type CreateMappingInput = z.infer<typeof createMappingSchema>;
+
+export function getFieldRetrieval(field: MappingField): MappingFieldRetrieval {
+  return {
+    cardinality: field.retrieval?.cardinality ?? 'one',
+    match: field.retrieval?.match ?? 'eq',
+    inferredBehavior: field.retrieval?.inferredBehavior ?? 'filter',
+    boost: field.retrieval?.boost ?? 0.2,
+    searchWeight: field.retrieval?.searchWeight ?? 'D',
+  };
+}

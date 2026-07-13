@@ -1,4 +1,10 @@
-import type { MappingEntity, MappingField, MappingRule } from '../schemas/mapping.js';
+import type {
+  MappingEntity,
+  MappingField,
+  MappingFieldRetrieval,
+  MappingRule,
+} from '../schemas/mapping.js';
+import { getFieldRetrieval } from '../schemas/mapping.js';
 import { toScalarString } from '../utils/scalar.js';
 
 export function applyFieldMapping(
@@ -9,7 +15,7 @@ export function applyFieldMapping(
   for (const field of fields) {
     const raw = payload[field.sourceColumn];
     const value = field.jsonPath ? readJsonPath(raw, field.jsonPath) : raw;
-    result[field.name] = coerceValue(value, field.type);
+    result[field.name] = coerceValue(value, field);
   }
   return result;
 }
@@ -70,6 +76,26 @@ function compareNumbers(
   return predicate(leftNumber, rightNumber);
 }
 
+/**
+ * Canonicalize multi-value fields from array, CSV string, or scalar.
+ */
+export function coerceToStringArray(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => toScalarString(item).trim())
+      .filter((item) => item.length > 0);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+  }
+  const scalar = toScalarString(value).trim();
+  return scalar ? [scalar] : [];
+}
+
 export function buildSearchSource(
   data: Record<string, unknown>,
   fields: MappingField[],
@@ -79,9 +105,50 @@ export function buildSearchSource(
     if (!field.searchable || field.sensitive) continue;
     const value = data[field.name];
     if (value === null || value === undefined) continue;
-    parts.push(toScalarString(value));
+    const retrieval = getFieldRetrieval(field);
+    if (retrieval.cardinality === 'many') {
+      parts.push(...coerceToStringArray(value));
+    } else {
+      parts.push(toScalarString(value));
+    }
   }
   return parts.join(' ').trim();
+}
+
+/**
+ * Build PostgreSQL setweight expression fragments for weighted FTS.
+ * Returns map of weight tier -> text content.
+ */
+export function buildWeightedSearchParts(
+  data: Record<string, unknown>,
+  fields: MappingField[],
+): Record<'A' | 'B' | 'C' | 'D', string> {
+  const buckets: Record<'A' | 'B' | 'C' | 'D', string[]> = {
+    A: [],
+    B: [],
+    C: [],
+    D: [],
+  };
+
+  for (const field of fields) {
+    if (!field.searchable || field.sensitive) continue;
+    const value = data[field.name];
+    if (value === null || value === undefined) continue;
+    const retrieval = getFieldRetrieval(field);
+    const text =
+      retrieval.cardinality === 'many'
+        ? coerceToStringArray(value).join(' ')
+        : toScalarString(value);
+    if (!text.trim()) continue;
+    buckets[retrieval.searchWeight].push(text.trim());
+  }
+
+  return {
+    A: buckets.A.join(' '),
+    B: buckets.B.join(' '),
+    C: buckets.C.join(' '),
+    D: buckets.D.join(' '),
+  };
 }
 
 export function renderTemplate(
@@ -95,7 +162,9 @@ export function renderTemplate(
       throw new Error(`Unknown template field: ${fieldName}`);
     }
     const value = data[fieldName];
-    return value === null || value === undefined ? '' : toScalarString(value);
+    if (value === null || value === undefined) return '';
+    if (Array.isArray(value)) return coerceToStringArray(value).join(' ');
+    return toScalarString(value);
   });
 }
 
@@ -107,14 +176,26 @@ export function renderPromptTemplate(
   let result = template;
   for (const field of inputFields) {
     const value = data[field];
-    result = result.replaceAll(`{{${field}}}`, value === undefined ? '' : toScalarString(value));
+    const rendered =
+      value === undefined
+        ? ''
+        : Array.isArray(value)
+          ? coerceToStringArray(value).join(' ')
+          : toScalarString(value);
+    result = result.replaceAll(`{{${field}}}`, rendered);
   }
   return result;
 }
 
-function coerceValue(value: unknown, type: MappingField['type']): unknown {
+function coerceValue(value: unknown, field: MappingField): unknown {
   if (value === null || value === undefined) return null;
-  switch (type) {
+  const retrieval = getFieldRetrieval(field);
+
+  if (retrieval.cardinality === 'many') {
+    return coerceToStringArray(value);
+  }
+
+  switch (field.type) {
     case 'number':
       return Number(value);
     case 'boolean':
@@ -170,4 +251,50 @@ export function findEntityForTable(
   table: string,
 ): MappingEntity | undefined {
   return entities.find((entity) => entity.sourceTable === table);
+}
+
+export function fieldMatchesPreference(
+  data: Record<string, unknown>,
+  field: string,
+  op: string,
+  value: string | number | boolean | Array<string | number | boolean>,
+  retrieval?: MappingFieldRetrieval,
+): boolean {
+  const raw = data[field];
+  if (raw === null || raw === undefined) return false;
+
+  const cardinality = retrieval?.cardinality ?? (Array.isArray(raw) ? 'many' : 'one');
+  const values =
+    cardinality === 'many' ? coerceToStringArray(raw) : [toScalarString(raw)];
+  const wanted = Array.isArray(value)
+    ? value.map((item) => toScalarString(item))
+    : [toScalarString(value)];
+
+  switch (op) {
+    case 'eq':
+      return values.some((item) => wanted.includes(item));
+    case 'neq':
+      return values.every((item) => !wanted.includes(item));
+    case 'in':
+    case 'containsAny':
+      return values.some((item) => wanted.includes(item));
+    case 'contains':
+      return wanted.every((item) => values.includes(item));
+    case 'containsAll':
+      return wanted.every((item) => values.includes(item));
+    case 'gt':
+    case 'gte':
+    case 'lt':
+    case 'lte': {
+      const left = Number(values[0]);
+      const right = Number(wanted[0]);
+      if (Number.isNaN(left) || Number.isNaN(right)) return false;
+      if (op === 'gt') return left > right;
+      if (op === 'gte') return left >= right;
+      if (op === 'lt') return left < right;
+      return left <= right;
+    }
+    default:
+      return false;
+  }
 }

@@ -2,53 +2,43 @@
   "entities": [
     {
       "entity": "variant",
-      "description": "Variantes de producto Shopify con precio, inventario y atributos",
+      "description": "Variantes de tela Bayon (Shopify)",
       "sourceTable": "variants",
       "fields": [
         {
           "name": "sku",
           "sourceColumn": "sku",
           "type": "string",
-          "description": "SKU de la variante",
           "searchable": true,
           "filterable": true,
           "visible": true,
           "sensitive": false,
-          "retrieval": {
-            "searchWeight": "A"
-          }
+          "retrieval": { "searchWeight": "A" }
         },
         {
           "name": "title",
           "sourceColumn": "title",
           "type": "string",
-          "description": "Título de la variante",
           "searchable": true,
           "filterable": false,
           "visible": true,
           "sensitive": false,
-          "retrieval": {
-            "searchWeight": "B"
-          }
+          "retrieval": { "searchWeight": "B" }
         },
         {
           "name": "productTitle",
           "sourceColumn": "productTitle",
           "type": "string",
-          "description": "Título del producto padre",
           "searchable": true,
           "filterable": false,
           "visible": true,
           "sensitive": false,
-          "retrieval": {
-            "searchWeight": "A"
-          }
+          "retrieval": { "searchWeight": "A" }
         },
         {
           "name": "price",
           "sourceColumn": "price",
           "type": "number",
-          "description": "Precio de venta",
           "searchable": false,
           "filterable": true,
           "visible": true,
@@ -58,7 +48,6 @@
           "name": "inventoryQuantity",
           "sourceColumn": "inventoryQuantity",
           "type": "number",
-          "description": "Cantidad en inventario",
           "searchable": false,
           "filterable": true,
           "visible": true,
@@ -68,7 +57,6 @@
           "name": "available",
           "sourceColumn": "available",
           "type": "boolean",
-          "description": "Disponibilidad derivada por estado activo y stock mayor a cero",
           "searchable": false,
           "filterable": true,
           "visible": true,
@@ -79,7 +67,6 @@
           "name": "size",
           "sourceColumn": "size",
           "type": "string",
-          "description": "Talla",
           "searchable": false,
           "filterable": true,
           "visible": true,
@@ -89,7 +76,6 @@
           "name": "color",
           "sourceColumn": "color",
           "type": "string",
-          "description": "Color",
           "searchable": false,
           "filterable": true,
           "visible": true,
@@ -99,7 +85,6 @@
           "name": "width",
           "sourceColumn": "width",
           "type": "string",
-          "description": "Ancho de la variante o tela",
           "searchable": true,
           "filterable": true,
           "visible": true,
@@ -110,7 +95,6 @@
           "name": "composition",
           "sourceColumn": "composition",
           "type": "string",
-          "description": "Composición del material",
           "searchable": true,
           "filterable": true,
           "visible": true,
@@ -121,7 +105,6 @@
           "name": "fabricType",
           "sourceColumn": "fabricType",
           "type": "string",
-          "description": "Tipo de tela",
           "searchable": true,
           "filterable": true,
           "visible": true,
@@ -132,7 +115,6 @@
           "name": "style",
           "sourceColumn": "style",
           "type": "string",
-          "description": "Estilo del producto",
           "searchable": true,
           "filterable": true,
           "visible": true,
@@ -143,23 +125,15 @@
           "name": "productType",
           "sourceColumn": "productType",
           "type": "string",
-          "description": "Tipo / categoría de producto",
-          "aliases": ["categoría", "categoria", "category", "tipo", "tipo de producto"],
           "searchable": true,
           "filterable": true,
           "visible": true,
-          "sensitive": false,
-          "retrieval": {
-            "inferredBehavior": "prefer",
-            "boost": 0.25,
-            "searchWeight": "B"
-          }
+          "sensitive": false
         },
         {
           "name": "productUrl",
           "sourceColumn": "productUrl",
           "type": "string",
-          "description": "URL pública del producto",
           "searchable": false,
           "filterable": false,
           "visible": true,
@@ -169,7 +143,6 @@
           "name": "imageUrl",
           "sourceColumn": "imageUrl",
           "type": "string",
-          "description": "Imagen principal de la variante o producto",
           "searchable": false,
           "filterable": false,
           "visible": true,
@@ -189,31 +162,14 @@
             "cardinality": "many",
             "match": "contains",
             "inferredBehavior": "prefer",
-            "boost": 0.3,
+            "boost": 0.35,
             "searchWeight": "B"
-          }
-        },
-        {
-          "name": "vendor",
-          "sourceColumn": "vendor",
-          "type": "string",
-          "description": "Marca o vendor",
-          "aliases": ["marca", "brand", "vendor"],
-          "searchable": true,
-          "filterable": true,
-          "visible": true,
-          "sensitive": false,
-          "retrieval": {
-            "inferredBehavior": "prefer",
-            "boost": 0.2,
-            "searchWeight": "C"
           }
         },
         {
           "name": "status",
           "sourceColumn": "status",
           "type": "string",
-          "description": "Estado del producto en Shopify",
           "searchable": false,
           "filterable": true,
           "visible": true,
@@ -239,7 +195,27 @@
         }
       ],
       "defaultFilters": [],
-      "embeddingTextTemplate": "{{productTitle}} {{title}} {{sku}} {{color}} {{size}} {{width}} {{collections}} {{composition}} {{fabricType}} {{style}} {{productType}} {{vendor}}"
+      "embeddingTextTemplate": "{{productTitle}} {{title}} {{sku}} {{color}} {{size}} {{width}} {{collections}} {{composition}} {{fabricType}} {{style}} {{productType}}",
+      "retrieval": {
+        "synonyms": {
+          "version": "bayon-fabrics-v1",
+          "entries": {
+            "vinipiel": ["piel sintetica", "cuero sintetico", "ecocuero"],
+            "piel sintetica": ["vinipiel", "ecocuero"],
+            "retapizar": ["tapiceria", "tapizar", "revestir"],
+            "tapiceria": ["retapizar", "tapizar"],
+            "loneta": ["canvas", "lona"],
+            "gabardina": ["twill"],
+            "chenille": ["chenila"],
+            "terciopelo": ["velvet"],
+            "antimancha": ["easy clean", "repelente"]
+          }
+        },
+        "rrf": {
+          "lexicalWeight": 1,
+          "vectorWeight": 1.1
+        }
+      }
     }
   ]
 }
