@@ -28,6 +28,7 @@ export * from './schemas/metrics.js';
 export * from './schemas/evals.js';
 export * from './evals/metrics.js';
 export * from './query/extract-filters.js';
+export * from './query/preference-candidates.js';
 export * from './query/relax-filters.js';
 export * from './query/llm-fallback.js';
 export * from './query/retrieval.js';

@@ -26,6 +26,7 @@ import { normalizeRequestFilters } from '../schemas/query.js';
 import { computeConfidence } from '../query/confidence.js';
 import { extractFilters, resolveExtractedMatches } from '../query/extract-filters.js';
 import { extractFiltersWithLlm } from '../query/llm-fallback.js';
+import { buildPreferenceCandidateFilterSets } from '../query/preference-candidates.js';
 import { buildRelaxedRetrievalState } from '../query/relax-filters.js';
 import {
   fuseLexicalAndVector,
@@ -34,8 +35,14 @@ import {
   lexicalSearch,
   vectorSearchForSource,
   type RawRecordRow,
+  type RetrievalHit,
 } from '../query/retrieval.js';
-import { applyPreferenceRescore, summarizeSignals } from '../query/rescore.js';
+import {
+  applyPreferenceRescore,
+  hasAnyPreferenceMatch,
+  rankByPreferenceCoverage,
+  summarizeSignals,
+} from '../query/rescore.js';
 import { shapeAppliedFilters, shapeRecordData } from '../query/shaping.js';
 import { expandQueryWithSynonyms } from '../query/synonyms.js';
 import { getFieldRetrieval } from '../schemas/mapping.js';
@@ -718,16 +725,63 @@ function extractProviderMeta(error: unknown): EmbeddingAttemptMeta | undefined {
   return undefined;
 }
 
+async function enrichPreferenceCandidates(args: {
+  input: ExecuteQueryInput;
+  prepared: PreparedQuery;
+  retrievalHits: RetrievalHit[];
+  appliedFilters: NormalizedFilter[];
+  appliedPreferences: QueryPreference[];
+}): Promise<RetrievalHit[]> {
+  if (args.appliedPreferences.length === 0) return args.retrievalHits;
+
+  const filterSets = buildPreferenceCandidateFilterSets(
+    args.appliedFilters,
+    args.appliedPreferences,
+    args.prepared.filterableFields,
+  );
+  if (filterSets.length === 0) return args.retrievalHits;
+
+  const byId = new Map(args.retrievalHits.map((hit) => [hit.id, hit]));
+  const scoreFloor =
+    Math.min(
+      ...args.retrievalHits
+        .map((hit) => hit.score)
+        .filter((score) => Number.isFinite(score) && score > 0),
+      0.01,
+    ) * 0.5;
+  const candidateLimit = Math.max(args.input.request.limit * 5, 50);
+
+  // Independent queries preserve OR semantics between preference alternatives.
+  for (const filters of filterSets) {
+    const candidates = await hybridSearch({
+      db: args.input.db,
+      workspaceId: args.input.workspaceId,
+      sourceIds: args.prepared.sourceIds,
+      ...(args.input.request.entity ? { entity: args.input.request.entity } : {}),
+      mappingVersionBySource: args.prepared.mappingVersionBySource,
+      embeddingModel: args.input.embeddingProvider.model,
+      filters,
+      freeText: '',
+      limit: candidateLimit,
+      filterableFields: args.prepared.filterableFields,
+      embeddingsAvailableBySource: args.prepared.embeddingsAvailableBySource,
+      lexicalWeight: args.prepared.lexicalWeight,
+      vectorWeight: args.prepared.vectorWeight,
+    });
+
+    for (const candidate of candidates.hits) {
+      if (byId.has(candidate.id)) continue;
+      byId.set(candidate.id, { ...candidate, score: scoreFloor });
+    }
+  }
+
+  return [...byId.values()];
+}
+
 async function finalizeResponse(args: {
   input: ExecuteQueryInput;
   prepared: PreparedQuery;
-  retrievalHits: Array<{
-    id: string;
-    entity: string;
-    score: number;
-    data: Record<string, unknown>;
-    lexicalMatch: boolean;
-  }>;
+  retrievalHits: RetrievalHit[];
   queryType: QueryType;
   warnings: string[];
   extractedFilters: NormalizedFilter[];
@@ -753,8 +807,15 @@ async function finalizeResponse(args: {
     metadata,
   } = args;
 
+  const enrichedHits = await enrichPreferenceCandidates({
+    input,
+    prepared,
+    retrievalHits,
+    appliedFilters,
+    appliedPreferences,
+  });
   const rescored = applyPreferenceRescore(
-    retrievalHits.map((hit) => ({
+    enrichedHits.map((hit) => ({
       id: hit.id,
       score: hit.score,
       data: hit.data,
@@ -762,9 +823,21 @@ async function finalizeResponse(args: {
     appliedPreferences,
     prepared.fieldsByName,
   );
+  const preferenceFallback =
+    appliedPreferences.length > 0 &&
+    rescored.hits.length > 0 &&
+    !hasAnyPreferenceMatch(rescored.hits, rescored.signalsById);
+  if (preferenceFallback) {
+    warnings.push(
+      'No candidates matched inferred preferences; returning semantic fallback',
+    );
+  }
 
-  const hitById = new Map(retrievalHits.map((hit) => [hit.id, hit]));
-  const rankedHits = rescored.hits
+  const hitById = new Map(enrichedHits.map((hit) => [hit.id, hit]));
+  const rankedHits = rankByPreferenceCoverage(
+    rescored.hits,
+    rescored.signalsById,
+  )
     .slice(0, input.request.limit)
     .map((item) => {
       const original = hitById.get(item.id);
@@ -790,7 +863,7 @@ async function finalizeResponse(args: {
     data: shapeRecordData(hit.data, fieldMap.get(hit.entity) ?? []),
   }));
 
-  const confidence = computeConfidence({
+  const baseConfidence = computeConfidence({
     rankedScores: rankedHits.map((hit) => hit.score),
     requestedFilterCount:
       extractedFilters.length + normalizeRequestFilters(input.request.filters).length,
@@ -799,6 +872,9 @@ async function finalizeResponse(args: {
     resultsCount: shapedResults.length,
     limit: input.request.limit,
   });
+  const confidence = preferenceFallback
+    ? Number((baseConfidence * 0.5).toFixed(4))
+    : baseConfidence;
 
   metadata.timings.totalMs = Date.now() - started;
 

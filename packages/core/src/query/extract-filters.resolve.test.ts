@@ -63,13 +63,13 @@ describe('resolveExtractedMatches', () => {
     ],
   ]);
 
-  it('routes prefer/filter/search according to mapping policy', () => {
+  it('routes implicit matches according to mapping policy and keeps explicit hard', () => {
     const matches: ExtractedFieldMatch[] = [
       {
         field: 'collections',
         op: 'contains',
         value: 'Verano',
-        origin: 'explicit',
+        origin: 'implicit',
         span: { start: 0, end: 16 },
       },
       {
@@ -107,5 +107,31 @@ describe('resolveExtractedMatches', () => {
     expect(resolved.unresolvedText.toLowerCase()).toContain('acme');
     expect(resolved.filters.some((filter) => filter.field === 'brand')).toBe(false);
     expect(resolved.preferences.some((pref) => pref.field === 'brand')).toBe(false);
+  });
+
+  it('keeps explicit hints as hard filters even when inferred behavior is prefer', () => {
+    const resolved = resolveExtractedMatches({
+      query: 'colección Verano',
+      matches: [
+        {
+          field: 'collections',
+          op: 'contains',
+          value: 'Verano',
+          origin: 'explicit',
+          span: { start: 0, end: 18 },
+        },
+      ],
+      fieldsByName: fields,
+    });
+
+    expect(resolved.filters).toEqual([
+      {
+        field: 'collections',
+        op: 'contains',
+        value: 'Verano',
+        origin: 'explicit',
+      },
+    ]);
+    expect(resolved.preferences).toEqual([]);
   });
 });

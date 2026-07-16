@@ -150,7 +150,10 @@ export function resolveExtractedMatches(input: {
   for (const match of input.matches) {
     const field = input.fieldsByName.get(match.field);
     const retrieval = field ? getFieldRetrieval(field) : undefined;
-    const behavior = retrieval?.inferredBehavior ?? 'filter';
+    // Mapping policy only controls inferred values. Explicit field hints such as
+    // "color blanco" are user constraints and must remain hard filters.
+    const behavior =
+      match.origin === 'explicit' ? 'filter' : (retrieval?.inferredBehavior ?? 'filter');
     const op = match.op;
 
     if (behavior === 'search') {
