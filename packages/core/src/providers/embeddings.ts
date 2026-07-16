@@ -5,8 +5,8 @@ import {
   type CircuitState,
 } from './circuit-breaker.js';
 
-export const DEFAULT_EMBEDDING_SOFT_DEADLINE_MS = 1_500;
-export const DEFAULT_EMBEDDING_HARD_TIMEOUT_MS = 3_000;
+export const DEFAULT_EMBEDDING_SOFT_DEADLINE_MS = 2_500;
+export const DEFAULT_EMBEDDING_HARD_TIMEOUT_MS = 4_000;
 export const DEFAULT_EMBEDDING_MAX_RETRIES = 1;
 export const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
 export const DEFAULT_CIRCUIT_RECOVERY_MS = 30_000;
