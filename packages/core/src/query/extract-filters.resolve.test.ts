@@ -94,7 +94,9 @@ describe('resolveExtractedMatches', () => {
       fieldsByName: fields,
     });
 
-    expect(resolved.filters).toEqual([{ field: 'status', op: 'eq', value: 'active' }]);
+    expect(resolved.filters).toEqual([
+      { field: 'status', op: 'eq', value: 'active', origin: 'explicit' },
+    ]);
     expect(resolved.preferences[0]).toMatchObject({
       field: 'collections',
       op: 'contains',

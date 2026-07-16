@@ -76,10 +76,15 @@
           "name": "color",
           "sourceColumn": "color",
           "type": "string",
-          "searchable": false,
+          "searchable": true,
           "filterable": true,
           "visible": true,
-          "sensitive": false
+          "sensitive": false,
+          "retrieval": {
+            "inferredBehavior": "prefer",
+            "boost": 0.25,
+            "searchWeight": "B"
+          }
         },
         {
           "name": "width",
@@ -95,8 +100,8 @@
           "name": "composition",
           "sourceColumn": "composition",
           "type": "string",
-          "searchable": true,
-          "filterable": true,
+          "searchable": false,
+          "filterable": false,
           "visible": true,
           "sensitive": false,
           "aliases": ["composición", "composicion", "material"]
@@ -109,7 +114,12 @@
           "filterable": true,
           "visible": true,
           "sensitive": false,
-          "aliases": ["tipo de tela", "tela", "fabric"]
+          "aliases": ["tipo de tela", "tela", "fabric"],
+          "retrieval": {
+            "inferredBehavior": "prefer",
+            "boost": 0.25,
+            "searchWeight": "A"
+          }
         },
         {
           "name": "style",
@@ -119,7 +129,12 @@
           "filterable": true,
           "visible": true,
           "sensitive": false,
-          "aliases": ["estilo"]
+          "aliases": ["estilo"],
+          "retrieval": {
+            "inferredBehavior": "prefer",
+            "boost": 0.25,
+            "searchWeight": "B"
+          }
         },
         {
           "name": "productType",
@@ -195,10 +210,10 @@
         }
       ],
       "defaultFilters": [],
-      "embeddingTextTemplate": "{{productTitle}} {{title}} {{sku}} {{color}} {{size}} {{width}} {{collections}} {{composition}} {{fabricType}} {{style}} {{productType}}",
+      "embeddingTextTemplate": "{{productTitle}} {{title}} {{sku}} {{color}} {{size}} {{width}} {{collections}} {{fabricType}} {{style}} {{productType}}",
       "retrieval": {
         "synonyms": {
-          "version": "bayon-fabrics-v1",
+          "version": "bayon-fabrics-v2",
           "entries": {
             "vinipiel": ["piel sintetica", "cuero sintetico", "ecocuero"],
             "piel sintetica": ["vinipiel", "ecocuero"],

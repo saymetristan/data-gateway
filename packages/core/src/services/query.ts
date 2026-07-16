@@ -26,6 +26,7 @@ import { normalizeRequestFilters } from '../schemas/query.js';
 import { computeConfidence } from '../query/confidence.js';
 import { extractFilters, resolveExtractedMatches } from '../query/extract-filters.js';
 import { extractFiltersWithLlm } from '../query/llm-fallback.js';
+import { buildRelaxedRetrievalState } from '../query/relax-filters.js';
 import {
   fuseLexicalAndVector,
   hybridSearch,
@@ -86,6 +87,8 @@ export type QueryResilienceMetadata = {
   fallbackReason?: string;
   /** True when the embedding arrived after softDeadlineMs but before hardTimeoutMs. */
   slowEmbedding?: boolean;
+  /** Implicit filters demoted to preferences after a 0-hit first pass. */
+  relaxedFilters?: NormalizedFilter[];
   synonymDictVersion?: string | undefined;
   synonymTermsAdded?: string[] | undefined;
   rankingSignals?: Array<{ id: string; matched: string[] }> | undefined;
@@ -105,6 +108,10 @@ type PreparedQuery = {
   sourceIds: string[];
   mappingVersionBySource: Map<string, number>;
   extractedFilters: NormalizedFilter[];
+  /** Extracted hard filters that originated from implicit NL matches. */
+  implicitFilters: NormalizedFilter[];
+  /** Defaults / presets / request filters — never demoted by relaxation. */
+  protectedFilters: NormalizedFilter[];
   extractedPreferences: QueryPreference[];
   unresolvedText: string;
   safeFilters: NormalizedFilter[];
@@ -239,10 +246,31 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
       hasFreeText &&
       prepared.sourceIds.some((sourceId) => prepared.embeddingsAvailableBySource.get(sourceId));
 
+    // Free-text for a possible relaxation retry: original query (terms stripped by
+    // over-eager implicit filters are restored for FTS).
+    let relaxedSearchText = input.request.query.trim();
+    if (
+      enableSynonyms &&
+      relaxedSearchText &&
+      Object.keys(prepared.synonymDictionary).length > 0
+    ) {
+      const expanded = expandQueryWithSynonyms(
+        relaxedSearchText,
+        prepared.synonymDictionary,
+      );
+      if (expanded.addedTerms.length > 0) {
+        relaxedSearchText = expanded.expanded;
+      }
+    }
+
     if (!hasFreeText) {
       const response = await withWorkspaceContext(input.db, input.workspaceId, async (tx) => {
+        const candidateLimit =
+          prepared.appliedPreferences.length > 0
+            ? Math.max(input.request.limit * 3, 30)
+            : input.request.limit;
         const fusionStarted = Date.now();
-        const retrieval = await hybridSearch({
+        let retrieval = await hybridSearch({
           db: tx,
           workspaceId: input.workspaceId,
           sourceIds: prepared.sourceIds,
@@ -251,22 +279,51 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
           embeddingModel: input.embeddingProvider.model,
           filters: prepared.safeFilters,
           freeText: '',
-          limit:
-            prepared.appliedPreferences.length > 0
-              ? Math.max(input.request.limit * 3, 30)
-              : input.request.limit,
+          limit: candidateLimit,
           filterableFields: prepared.filterableFields,
           embeddingsAvailableBySource: prepared.embeddingsAvailableBySource,
           lexicalWeight: prepared.lexicalWeight,
           vectorWeight: prepared.vectorWeight,
         });
         metadata.timings.fusionMs = Date.now() - fusionStarted;
+        warnings.push(...retrieval.warnings);
+
+        const relaxed = applyImplicitFilterRelaxation({
+          prepared,
+          hitsLength: retrieval.hits.length,
+          warnings,
+          metadata,
+          ...(input.request.entity ? { entityFilter: input.request.entity } : {}),
+        });
+        if (relaxed) {
+          appliedFilters = relaxed.appliedFilters;
+          appliedPreferences = relaxed.appliedPreferences;
+          const retryStarted = Date.now();
+          retrieval = await hybridSearch({
+            db: tx,
+            workspaceId: input.workspaceId,
+            sourceIds: prepared.sourceIds,
+            ...(input.request.entity ? { entity: input.request.entity } : {}),
+            mappingVersionBySource: prepared.mappingVersionBySource,
+            embeddingModel: input.embeddingProvider.model,
+            filters: relaxed.filters,
+            freeText: relaxedSearchText,
+            limit: Math.max(input.request.limit * 3, 30),
+            filterableFields: prepared.filterableFields,
+            embeddingsAvailableBySource: prepared.embeddingsAvailableBySource,
+            lexicalWeight: prepared.lexicalWeight,
+            vectorWeight: prepared.vectorWeight,
+          });
+          metadata.timings.fusionMs += Date.now() - retryStarted;
+          warnings.push(...retrieval.warnings);
+        }
+
         return finalizeResponse({
           input: { ...input, db: tx },
           prepared,
           retrievalHits: retrieval.hits,
           queryType: retrieval.queryType,
-          warnings: [...warnings, ...retrieval.warnings],
+          warnings,
           extractedFilters,
           extractedPreferences,
           unresolvedText,
@@ -276,6 +333,9 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
           metadata,
         });
       });
+      queryType = response.query_type;
+      resultsCount = response.results.length;
+      confidence = response.confidence;
       return response;
     }
 
@@ -338,10 +398,11 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
     }
 
     const response = await withWorkspaceContext(input.db, input.workspaceId, async (tx) => {
-      let vectorRows: RawRecordRow[] = [];
-      const vectorStarted = Date.now();
+      const candidateLimit = Math.max(input.request.limit * 3, 30);
 
-      if (embeddingResolution.embedding) {
+      const runVector = async (filters: NormalizedFilter[]): Promise<RawRecordRow[]> => {
+        let vectorRows: RawRecordRow[] = [];
+        if (!embeddingResolution.embedding) return vectorRows;
         const sourcesWithEmbeddings = prepared.sourceIds.filter((sourceId) =>
           prepared.embeddingsAvailableBySource.get(sourceId),
         );
@@ -354,7 +415,7 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
                 db: tx,
                 workspaceId: input.workspaceId,
                 ...(input.request.entity ? { entity: input.request.entity } : {}),
-                filters: prepared.safeFilters,
+                filters,
                 filterableFields: prepared.filterableFields,
                 embeddingModel: input.embeddingProvider.model,
                 mappingVersion,
@@ -367,31 +428,81 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
             warnings.push(`Vector search failed for source ${sourceId}; using lexical only`);
           }
         }
-      }
+        return vectorRows;
+      };
+
+      const vectorStarted = Date.now();
+      const vectorRows = await runVector(prepared.safeFilters);
       metadata.timings.vectorMs = Date.now() - vectorStarted;
 
       const fusionStarted = Date.now();
-      const retrieval =
+      let retrieval =
         vectorRows.length > 0
           ? fuseLexicalAndVector({
               lexicalRows,
               vectorRows,
-              limit: Math.max(input.request.limit * 3, 30),
+              limit: candidateLimit,
               lexicalWeight: prepared.lexicalWeight,
               vectorWeight: prepared.vectorWeight,
             })
           : {
               queryType: 'lexical' as const,
-              hits: lexicalRowsToHits(
-                lexicalRows,
-                Math.max(input.request.limit * 3, 30),
-              ),
+              hits: lexicalRowsToHits(lexicalRows, candidateLimit),
               lexicalRanking: lexicalRows.map((row) => row.id),
               vectorRanking: [] as string[],
               warnings: [] as string[],
             };
       metadata.timings.fusionMs = Date.now() - fusionStarted;
       warnings.push(...retrieval.warnings);
+
+      const relaxed = applyImplicitFilterRelaxation({
+        prepared,
+        hitsLength: retrieval.hits.length,
+        warnings,
+        metadata,
+        ...(input.request.entity ? { entityFilter: input.request.entity } : {}),
+      });
+      if (relaxed) {
+        appliedFilters = relaxed.appliedFilters;
+        appliedPreferences = relaxed.appliedPreferences;
+
+        const retryStarted = Date.now();
+        const [relaxedLexical, relaxedVector] = await Promise.all([
+          lexicalSearch({
+            db: tx,
+            workspaceId: input.workspaceId,
+            sourceIds: prepared.sourceIds,
+            ...(input.request.entity ? { entity: input.request.entity } : {}),
+            filters: relaxed.filters,
+            filterableFields: prepared.filterableFields,
+            freeText: relaxedSearchText,
+            limit: input.request.limit,
+          }),
+          runVector(relaxed.filters),
+        ]);
+        metadata.timings.lexicalMs += Date.now() - retryStarted;
+        metadata.timings.vectorMs += Date.now() - retryStarted;
+
+        const retryFusionStarted = Date.now();
+        retrieval =
+          relaxedVector.length > 0
+            ? fuseLexicalAndVector({
+                lexicalRows: relaxedLexical,
+                vectorRows: relaxedVector,
+                limit: candidateLimit,
+                lexicalWeight: prepared.lexicalWeight,
+                vectorWeight: prepared.vectorWeight,
+              })
+            : {
+                queryType: 'lexical' as const,
+                hits: lexicalRowsToHits(relaxedLexical, candidateLimit),
+                lexicalRanking: relaxedLexical.map((row) => row.id),
+                vectorRanking: [] as string[],
+                warnings: [] as string[],
+              };
+        metadata.timings.fusionMs += Date.now() - retryFusionStarted;
+        warnings.push(...retrieval.warnings);
+      }
 
       return finalizeResponse({
         input: { ...input, db: tx },
@@ -724,6 +835,43 @@ async function finalizeResponse(args: {
   return payload;
 }
 
+function applyImplicitFilterRelaxation(args: {
+  prepared: PreparedQuery;
+  hitsLength: number;
+  warnings: string[];
+  metadata: QueryResilienceMetadata;
+  entityFilter?: string;
+}): {
+  filters: NormalizedFilter[];
+  appliedFilters: NormalizedFilter[];
+  appliedPreferences: QueryPreference[];
+} | null {
+  if (args.hitsLength > 0 || args.prepared.implicitFilters.length === 0) {
+    return null;
+  }
+
+  const relaxed = buildRelaxedRetrievalState({
+    safeFilters: args.prepared.safeFilters,
+    appliedPreferences: args.prepared.appliedPreferences,
+    implicitFilters: args.prepared.implicitFilters,
+    protectedFilters: args.prepared.protectedFilters,
+    fieldsByName: args.prepared.fieldsByName,
+  });
+  if (!relaxed) return null;
+
+  args.metadata.relaxedFilters = relaxed.demoted;
+  args.warnings.push('Relaxed inferred filters to preferences after empty result');
+
+  return {
+    filters: relaxed.filters,
+    appliedFilters: shapeAppliedFilters(
+      relaxed.filters,
+      collectAllFields(args.prepared.queryable, args.entityFilter),
+    ),
+    appliedPreferences: relaxed.preferences,
+  };
+}
+
 async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<PreparedQuery> {
   const warnings: string[] = [];
   const queryable = await resolveQueryableSources(
@@ -769,13 +917,24 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
   });
   warnings.push(...resolved.warnings);
 
-  const extractedFilters = resolved.filters;
+  const extractedFilters: NormalizedFilter[] = resolved.filters.map(
+    ({ field, op, value }) => ({ field, op, value }),
+  );
+  const implicitFilters: NormalizedFilter[] = resolved.filters
+    .filter((filter) => filter.origin === 'implicit')
+    .map(({ field, op, value }) => ({ field, op, value }));
   const unresolvedText = resolved.unresolvedText;
 
   const defaultFilters = collectDefaultFilters(queryable, entityFilter);
+  const requestFilters = normalizeRequestFilters(input.request.filters);
+  const protectedFilters = [
+    ...defaultFilters,
+    ...(input.presetFilters ?? []),
+    ...requestFilters,
+  ];
   const mergedFilters = mergeFilters(
     [...extractedFilters, ...(input.presetFilters ?? [])],
-    normalizeRequestFilters(input.request.filters),
+    requestFilters,
     defaultFilters,
   );
 
@@ -826,6 +985,8 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     sourceIds,
     mappingVersionBySource,
     extractedFilters,
+    implicitFilters,
+    protectedFilters,
     extractedPreferences: resolved.preferences,
     unresolvedText,
     safeFilters,
