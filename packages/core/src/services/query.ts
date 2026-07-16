@@ -84,6 +84,8 @@ export type QueryResilienceMetadata = {
   circuitState?: string;
   providerAttempts?: number;
   fallbackReason?: string;
+  /** True when the embedding arrived after softDeadlineMs but before hardTimeoutMs. */
+  slowEmbedding?: boolean;
   synonymDictVersion?: string | undefined;
   synonymTermsAdded?: string[] | undefined;
   rankingSignals?: Array<{ id: string; matched: string[] }> | undefined;
@@ -126,6 +128,8 @@ type EmbeddingResolution = {
   cacheMs: number;
   providerMeta?: EmbeddingAttemptMeta;
   fallbackReason?: string;
+  /** Soft deadline exceeded but embedding still used (telemetry only). */
+  slowEmbedding?: boolean;
   lateWrite?: Promise<void>;
 };
 
@@ -310,6 +314,9 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
     metadata.cache = embeddingResolution.cache;
     metadata.timings.cacheMs = embeddingResolution.cacheMs;
     metadata.timings.providerMs = embeddingResolution.providerMs;
+    if (embeddingResolution.slowEmbedding) {
+      metadata.slowEmbedding = true;
+    }
     if (embeddingResolution.providerMeta) {
       metadata.circuitState = embeddingResolution.providerMeta.circuitState;
       metadata.providerAttempts = embeddingResolution.providerMeta.attempts;
@@ -319,8 +326,8 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
       warnings.push(
         embeddingResolution.fallbackReason === 'circuit_open'
           ? 'Embedding circuit open; using lexical search only'
-          : embeddingResolution.fallbackReason === 'deadline'
-            ? 'Query embedding missed soft deadline; using lexical search only'
+          : embeddingResolution.fallbackReason === 'timeout'
+            ? 'Query embedding timed out; using lexical search only'
             : 'Query embedding failed; using lexical search only',
       );
     }
@@ -480,16 +487,17 @@ async function resolveQueryEmbedding(
     return vector;
   });
 
-  const softRace = Promise.race([
-    providerPromise.then((embedding) => ({ kind: 'ok' as const, embedding })),
-    sleep(softDeadlineMs).then(() => ({ kind: 'deadline' as const })),
-  ]);
-
-  const raced = await softRace;
+  // Soft deadline is telemetry only. Wait until hard timeout before lexical fallback
+  // so a slow OpenRouter call (e.g. 1.5–3s) still gets hybrid search on this request.
+  const waited = await awaitEmbeddingWithinHardTimeout(
+    providerPromise,
+    softDeadlineMs,
+    hardTimeoutMs,
+  );
   const providerMs = Date.now() - providerStarted;
 
-  if (raced.kind === 'ok') {
-    const embedding = raced.embedding;
+  if (waited.kind === 'ok') {
+    const embedding = waited.value;
     const lateWrite = withWorkspaceContext(input.db, input.workspaceId, (tx) =>
       cache.store(tx, {
         workspaceId: input.workspaceId,
@@ -504,52 +512,82 @@ async function resolveQueryEmbedding(
       cache: 'miss',
       providerMs,
       cacheMs,
+      ...(waited.slow ? { slowEmbedding: true } : {}),
       lateWrite,
     };
   }
 
-  // Soft deadline missed — continue provider until hard timeout for cache warm.
-  const lateWrite = Promise.race([
-    providerPromise,
-    sleep(Math.max(0, hardTimeoutMs - providerMs)).then(() => null),
-  ]).then(async (embedding) => {
-    if (!embedding) return;
-    await withWorkspaceContext(input.db, input.workspaceId, (tx) =>
-      cache.store(tx, {
-        workspaceId: input.workspaceId,
-        query: queryText,
-        model: input.embeddingProvider.model,
-        dimensions: input.embeddingProvider.dimensions,
-        embedding,
-      }),
-    ).catch(() => undefined);
-  });
-
-  let fallbackReason = 'deadline';
-  let providerMeta: EmbeddingAttemptMeta | undefined;
-
-  // If provider already failed before/at deadline, prefer that reason.
-  const settled = await Promise.race([
-    providerPromise.then(
-      (embedding) => ({ status: 'fulfilled' as const, embedding }),
-      (error: unknown) => ({ status: 'rejected' as const, error }),
-    ),
-    Promise.resolve(null),
-  ]);
-  if (settled?.status === 'rejected') {
-    fallbackReason = extractFallbackReason(settled.error);
-    providerMeta = extractProviderMeta(settled.error);
+  if (waited.kind === 'error') {
+    const providerMeta = extractProviderMeta(waited.error);
+    return {
+      embedding: null,
+      cache: 'miss',
+      providerMs,
+      cacheMs,
+      ...(providerMeta ? { providerMeta } : {}),
+      fallbackReason: extractFallbackReason(waited.error),
+      ...(waited.slow ? { slowEmbedding: true } : {}),
+    };
   }
+
+  // Hard timeout — provider may still finish; warm cache for subsequent queries.
+  const lateWrite = providerPromise
+    .then(async (embedding) => {
+      await withWorkspaceContext(input.db, input.workspaceId, (tx) =>
+        cache.store(tx, {
+          workspaceId: input.workspaceId,
+          query: queryText,
+          model: input.embeddingProvider.model,
+          dimensions: input.embeddingProvider.dimensions,
+          embedding,
+        }),
+      ).catch(() => undefined);
+    })
+    .catch(() => undefined);
 
   return {
     embedding: null,
     cache: 'miss',
     providerMs,
     cacheMs,
-    ...(providerMeta ? { providerMeta } : {}),
-    fallbackReason,
+    fallbackReason: 'timeout',
+    slowEmbedding: true,
     lateWrite,
   };
+}
+
+/**
+ * Wait for an embedding provider up to hardTimeoutMs.
+ * Soft deadline only marks the result as slow — it does not abandon the vector.
+ */
+export async function awaitEmbeddingWithinHardTimeout<T>(
+  promise: Promise<T>,
+  softDeadlineMs: number,
+  hardTimeoutMs: number,
+): Promise<
+  | { kind: 'ok'; value: T; slow: boolean }
+  | { kind: 'timeout'; slow: boolean }
+  | { kind: 'error'; error: unknown; slow: boolean }
+> {
+  const started = Date.now();
+
+  const raced = await Promise.race([
+    promise.then(
+      (value) => ({ kind: 'ok' as const, value }),
+      (error: unknown) => ({ kind: 'error' as const, error }),
+    ),
+    sleep(hardTimeoutMs).then(() => ({ kind: 'timeout' as const })),
+  ]);
+
+  const slow = Date.now() - started >= softDeadlineMs;
+
+  if (raced.kind === 'ok') {
+    return { kind: 'ok', value: raced.value, slow };
+  }
+  if (raced.kind === 'error') {
+    return { kind: 'error', error: raced.error, slow };
+  }
+  return { kind: 'timeout', slow: true };
 }
 
 function extractFallbackReason(error: unknown): string {
