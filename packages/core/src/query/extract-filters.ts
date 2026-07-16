@@ -28,8 +28,12 @@ export type ExtractFiltersResult = {
   warnings: string[];
 };
 
+export type ResolvedFilter = NormalizedFilter & {
+  origin: 'explicit' | 'implicit';
+};
+
 export type ResolveMatchesResult = {
-  filters: NormalizedFilter[];
+  filters: ResolvedFilter[];
   preferences: QueryPreference[];
   unresolvedText: string;
   warnings: string[];
@@ -139,7 +143,7 @@ export function resolveExtractedMatches(input: {
   extraWarnings?: string[];
 }): ResolveMatchesResult {
   const warnings = [...(input.extraWarnings ?? [])];
-  const filters: NormalizedFilter[] = [];
+  const filters: ResolvedFilter[] = [];
   const preferences: QueryPreference[] = [];
   const consumed: Array<{ start: number; end: number }> = [];
 
@@ -158,7 +162,7 @@ export function resolveExtractedMatches(input: {
         field: match.field,
         op,
         value: match.value,
-        boost: retrieval?.boost,
+        ...(retrieval?.boost !== undefined ? { boost: retrieval.boost } : {}),
       });
       consumed.push(match.span);
       continue;
@@ -168,6 +172,7 @@ export function resolveExtractedMatches(input: {
       field: match.field,
       op,
       value: match.value,
+      origin: match.origin,
     });
     consumed.push(match.span);
   }
@@ -339,7 +344,8 @@ function extractExplicitStringMatch(
     null;
 
   for (const value of values) {
-    const valueMatch = findValueMatch(normalizedTail, value);
+    // Explicit (hinted) matches may use numeric aliases: "ancho 100" → "100cm".
+    const valueMatch = findValueMatch(normalizedTail, value, { allowNumericAlias: true });
     if (valueMatch) {
       const valueStart = hintSpan.end + valueMatch.span.start;
       const candidate = {
@@ -468,8 +474,9 @@ function findFieldHintSpans(
 function findValueMatch(
   normalizedText: string,
   value: string,
+  options?: { allowNumericAlias?: boolean },
 ): { span: { start: number; end: number }; length: number } | null {
-  const tokens = valueTokens(value);
+  const tokens = valueTokens(value, options);
   for (const token of tokens) {
     const span = findNormalizedTokenSpan(normalizedText, token);
     if (span) return { span, length: token.length };
@@ -477,11 +484,19 @@ function findValueMatch(
   return null;
 }
 
-function valueTokens(value: string): string[] {
+/**
+ * Tokens used to match a catalog value against free text.
+ * Implicit matches use the full normalized value only — a bare "100" from "100cm"
+ * must not match "algodón 100%" (false width filter).
+ * Explicit/hinted matches may also use a leading numeric alias ("ancho 100" → "100cm").
+ */
+function valueTokens(value: string, options?: { allowNumericAlias?: boolean }): string[] {
   const full = normalizeText(value);
   const tokens = [full];
-  const numeric = full.match(/^\d+(?:[.,]\d+)?/)?.[0];
-  if (numeric && numeric.length >= 2) tokens.push(numeric);
+  if (options?.allowNumericAlias) {
+    const numeric = full.match(/^\d+(?:[.,]\d+)?/)?.[0];
+    if (numeric && numeric.length >= 2) tokens.push(numeric);
+  }
   return [...new Set(tokens)]
     .filter((token) => token.length > 0)
     .sort((a, b) => b.length - a.length);

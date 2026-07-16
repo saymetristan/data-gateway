@@ -210,6 +210,7 @@ const shopifyProfile: SourceProfileDocument = {
           topValues: [
             { value: '1.50 m', count: 10 },
             { value: '1.40 m', count: 10 },
+            { value: '100cm', count: 5 },
           ],
         },
         {
@@ -431,6 +432,20 @@ describe('extractFilters', () => {
     const result = runShopify('tela ancho 1.50');
     expect(result.filters).toContainEqual({ field: 'width', op: 'eq', value: '1.50 m' });
     expect(result.filters).not.toContainEqual({ field: 'width', op: 'eq', value: 'ancho' });
+  });
+
+  it('no toma "100%" como width=100cm en matches implícitos', () => {
+    const result = runShopify('algodón 100%');
+    expect(result.filters.find((filter) => filter.field === 'width')).toBeUndefined();
+    expect(result.matches.find((match) => match.field === 'width')).toBeUndefined();
+  });
+
+  it('sí mapea "ancho 100" a width=100cm vía hint explícito', () => {
+    const result = runShopify('tela ancho 100');
+    expect(result.filters).toContainEqual({ field: 'width', op: 'eq', value: '100cm' });
+    expect(result.matches).toContainEqual(
+      expect.objectContaining({ field: 'width', origin: 'explicit', value: '100cm' }),
+    );
   });
 
   it('extrae tipo de tela como filtro real desde label + valor', () => {
