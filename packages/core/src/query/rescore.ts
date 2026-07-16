@@ -5,10 +5,9 @@ import type { QueryPreference } from '../schemas/query.js';
 
 export type RankingSignal = {
   field: string;
-  op: string;
-  value: string | number | boolean | Array<string | number | boolean>;
   boost: number;
   matched: boolean;
+  matchedValues: QueryPreference['value'][];
 };
 
 export type RescoreInput = {
@@ -37,28 +36,37 @@ export function applyPreferenceRescore(
     return { hits, signalsById: new Map() };
   }
 
+  const preferencesByField = groupPreferencesByField(preferences);
   const signalsById = new Map<string, RankingSignal[]>();
   const rescored = hits.map((hit) => {
     const signals: RankingSignal[] = [];
     let boostSum = 0;
 
-    for (const preference of preferences) {
-      const field = fieldsByName.get(preference.field);
+    for (const [fieldName, fieldPreferences] of preferencesByField) {
+      const field = fieldsByName.get(fieldName);
       const retrieval = field ? getFieldRetrieval(field) : undefined;
-      const boost = preference.boost ?? retrieval?.boost ?? 0.15;
-      const matched = fieldMatchesPreference(
-        hit.data,
-        preference.field,
-        preference.op,
-        preference.value,
-        retrieval,
+      const matchedPreferences = fieldPreferences.filter((preference) =>
+        fieldMatchesPreference(
+          hit.data,
+          preference.field,
+          preference.op,
+          preference.value,
+          retrieval,
+        ),
+      );
+      const matched = matchedPreferences.length > 0;
+      // Values from the same field are alternatives (OR), not independent boosts.
+      const boost = Math.max(
+        0,
+        ...matchedPreferences.map(
+          (preference) => preference.boost ?? retrieval?.boost ?? 0.15,
+        ),
       );
       signals.push({
-        field: preference.field,
-        op: preference.op,
-        value: preference.value,
+        field: fieldName,
         boost,
         matched,
+        matchedValues: matchedPreferences.map((preference) => preference.value),
       });
       if (matched) boostSum += boost;
     }
@@ -73,6 +81,45 @@ export function applyPreferenceRescore(
 
   rescored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
   return { hits: rescored, signalsById };
+}
+
+export function rankByPreferenceCoverage(
+  hits: RescoreInput[],
+  signalsById: Map<string, RankingSignal[]>,
+): RescoreInput[] {
+  return [...hits].sort((left, right) => {
+    const leftCoverage = matchedFieldCount(signalsById.get(left.id));
+    const rightCoverage = matchedFieldCount(signalsById.get(right.id));
+    return (
+      rightCoverage - leftCoverage ||
+      right.score - left.score ||
+      left.id.localeCompare(right.id)
+    );
+  });
+}
+
+export function hasAnyPreferenceMatch(
+  hits: RescoreInput[],
+  signalsById: Map<string, RankingSignal[]>,
+): boolean {
+  return hits.some((hit) => matchedFieldCount(signalsById.get(hit.id)) > 0);
+}
+
+function groupPreferencesByField(
+  preferences: QueryPreference[],
+): Map<string, QueryPreference[]> {
+  const grouped = new Map<string, QueryPreference[]>();
+  for (const preference of preferences) {
+    grouped.set(preference.field, [
+      ...(grouped.get(preference.field) ?? []),
+      preference,
+    ]);
+  }
+  return grouped;
+}
+
+function matchedFieldCount(signals: RankingSignal[] | undefined): number {
+  return (signals ?? []).filter((signal) => signal.matched).length;
 }
 
 export function preferenceMatchesData(
