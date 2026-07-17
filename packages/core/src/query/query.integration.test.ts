@@ -169,6 +169,7 @@ describe.runIf(hasFixture)('query integration', () => {
         embeddingProvider: new MockEmbeddingProvider(1024),
       });
 
+      expect(response.query_type).toBe('hybrid_search');
       expect(response.applied_filters).toContainEqual({ field: 'available', op: 'eq', value: true });
       for (const result of response.results) {
         expect(Number(result.data.stock)).toBeGreaterThan(0);
@@ -339,6 +340,7 @@ describe.runIf(hasFixture)('query integration', () => {
       expect(logs[0]?.latencyMs).toBeGreaterThanOrEqual(0);
       expect(logs[0]?.appliedFilters).toBeTruthy();
       expect(logs[0]?.confidence).toBeGreaterThanOrEqual(0);
+      expect(logs[0]?.metadata).toMatchObject({ vectorStrategy: 'ann_first' });
     });
   });
 
