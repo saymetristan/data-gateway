@@ -89,6 +89,7 @@ export type QueryTimingMetadata = {
 export type QueryResilienceMetadata = {
   timings: QueryTimingMetadata;
   cache: CacheLayer;
+  vectorStrategy?: 'ann_first';
   circuitState?: string;
   providerAttempts?: number;
   fallbackReason?: string;
@@ -439,6 +440,9 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
       };
 
       const vectorStarted = Date.now();
+      if (embeddingResolution.embedding) {
+        metadata.vectorStrategy = 'ann_first';
+      }
       const vectorRows = await runVector(prepared.safeFilters);
       metadata.timings.vectorMs = Date.now() - vectorStarted;
 

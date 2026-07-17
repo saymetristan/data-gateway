@@ -7,6 +7,9 @@ import { reciprocalRankFusion } from './rrf.js';
 
 const LEXICAL_CANDIDATE_LIMIT = 50;
 const VECTOR_CANDIDATE_LIMIT = 50;
+const VECTOR_PROBE_LIMIT = 200;
+const HNSW_EF_SEARCH = 100;
+const HNSW_MAX_SCAN_TUPLES = 1_000;
 const TRIGRAM_THRESHOLD = 0.3;
 
 /** Default RRF weights: slight lexical bias when vector is late/noisy. */
@@ -213,19 +216,42 @@ export async function vectorSearchForSource(
   });
 
   const result = await input.db.execute(sql`
+    WITH hnsw_settings AS MATERIALIZED (
+      SELECT
+        set_config('hnsw.ef_search', ${String(HNSW_EF_SEARCH)}, true) AS ef_search,
+        set_config('hnsw.iterative_scan', 'strict_order', true) AS iterative_scan,
+        set_config(
+          'hnsw.max_scan_tuples',
+          ${String(HNSW_MAX_SCAN_TUPLES)},
+          true
+        ) AS max_scan_tuples
+    ),
+    vector_candidates AS MATERIALIZED (
+      SELECT candidate.record_id, candidate.distance
+      FROM hnsw_settings settings
+      CROSS JOIN LATERAL (
+        SELECT
+          re.record_id,
+          (re.embedding <=> ${vectorLiteral}::vector) AS distance
+        FROM record_embeddings re
+        WHERE re.embedding_model = ${input.embeddingModel}
+          AND re.mapping_version = ${input.mappingVersion}
+          AND settings.iterative_scan IS NOT NULL
+        ORDER BY re.embedding <=> ${vectorLiteral}::vector
+        LIMIT ${VECTOR_PROBE_LIMIT}
+      ) candidate
+    )
     SELECT
       r.id,
       r.entity,
       r.source_id,
       r.data,
       r.search_source,
-      (re.embedding <=> ${vectorLiteral}::vector) AS distance
-    FROM records r
-    INNER JOIN record_embeddings re ON re.record_id = r.id
+      vc.distance
+    FROM vector_candidates vc
+    INNER JOIN records r ON r.id = vc.record_id
     WHERE ${where}
-      AND re.embedding_model = ${input.embeddingModel}
-      AND re.mapping_version = ${input.mappingVersion}
-    ORDER BY distance ASC
+    ORDER BY vc.distance ASC
     LIMIT ${VECTOR_CANDIDATE_LIMIT}
   `);
 
