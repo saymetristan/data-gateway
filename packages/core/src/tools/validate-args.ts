@@ -26,26 +26,7 @@ function buildArgsSchema(tool: ToolDefinition): z.ZodType<Record<string, unknown
 }
 
 function propertyToZod(property: Record<string, unknown>, required: boolean): z.ZodTypeAny {
-  const type = property.type;
-  let schema: z.ZodTypeAny;
-
-  if (type === 'integer' || type === 'number') {
-    let numberSchema = z.number();
-    if (typeof property.minimum === 'number') {
-      numberSchema = numberSchema.min(property.minimum);
-    }
-    if (typeof property.maximum === 'number') {
-      numberSchema = numberSchema.max(property.maximum);
-    }
-    schema = type === 'integer' ? numberSchema.int() : numberSchema;
-  } else if (type === 'boolean') {
-    schema = z.boolean();
-  } else if (Array.isArray(property.enum) && property.enum.length > 0) {
-    const values = property.enum.map((value) => String(value));
-    schema = z.enum(values as [string, ...string[]]);
-  } else {
-    schema = z.string();
-  }
+  let schema = jsonSchemaToZod(property);
 
   if (!required) {
     schema = schema.optional();
@@ -63,4 +44,38 @@ function propertyToZod(property: Record<string, unknown>, required: boolean): z.
   }
 
   return schema;
+}
+
+function jsonSchemaToZod(property: Record<string, unknown>): z.ZodTypeAny {
+  const type = property.type;
+
+  if (type === 'array') {
+    const items =
+      property.items && typeof property.items === 'object' && !Array.isArray(property.items)
+        ? (property.items as Record<string, unknown>)
+        : { type: 'string' };
+    return z.array(jsonSchemaToZod(items));
+  }
+
+  if (type === 'integer' || type === 'number') {
+    let numberSchema = z.number();
+    if (typeof property.minimum === 'number') {
+      numberSchema = numberSchema.min(property.minimum);
+    }
+    if (typeof property.maximum === 'number') {
+      numberSchema = numberSchema.max(property.maximum);
+    }
+    return type === 'integer' ? numberSchema.int() : numberSchema;
+  }
+
+  if (type === 'boolean') {
+    return z.boolean();
+  }
+
+  if (Array.isArray(property.enum) && property.enum.length > 0) {
+    const values = property.enum.map((value) => String(value));
+    return z.enum(values as [string, ...string[]]);
+  }
+
+  return z.string();
 }
