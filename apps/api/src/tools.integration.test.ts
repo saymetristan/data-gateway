@@ -207,6 +207,12 @@ describe.runIf(hasDatabase)('tools API integration', () => {
     const searchTool = manifest.tools.find((tool) => tool.name === 'search_variant');
     expect(searchTool).toBeDefined();
     expect(isValidToolSchema(searchTool!.inputSchema)).toBe(true);
+    const searchProperties = searchTool!.inputSchema.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(searchProperties.collections?.type).toBe('array');
+    expect(searchProperties.prefer_collections?.type).toBe('array');
 
     const invokeDenied = await app.request('/tools/search_variant/invoke', {
       method: 'POST',
@@ -258,6 +264,46 @@ describe.runIf(hasDatabase)('tools API integration', () => {
     expect(body.results[0]?.data.productUrl).toBeTruthy();
     expect(body.results[0]?.data.imageUrl).toBeTruthy();
     expect(body.applied_filters.some((filter) => filter.field === 'available')).toBe(false);
+
+    const invokeArrayArgs = await app.request('/tools/search_variant/invoke', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${toolsKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        args: {
+          query: 'Producto Shopify',
+          collections: ['verano'],
+          prefer_collections: ['verano'],
+          limit: 5,
+        },
+      }),
+    });
+    expect(invokeArrayArgs.status).toBe(200);
+    const arrayBody = (await invokeArrayArgs.json()) as {
+      kind: string;
+      applied_filters: Array<{ field: string; op: string; value: unknown }>;
+      applied_preferences?: Array<{ field: string; op: string; value: unknown }>;
+    };
+    expect(arrayBody.kind).toBe('search');
+    expect(
+      arrayBody.applied_filters.some(
+        (filter) =>
+          filter.field === 'collections' &&
+          filter.op === 'containsAny' &&
+          Array.isArray(filter.value) &&
+          filter.value.includes('verano'),
+      ),
+    ).toBe(true);
+    expect(
+      (arrayBody.applied_preferences ?? []).some(
+        (preference) =>
+          preference.field === 'collections' &&
+          Array.isArray(preference.value) &&
+          preference.value.includes('verano'),
+      ),
+    ).toBe(true);
 
     const logs = await db.select().from(queryLogs).where(eq(queryLogs.workspaceId, workspace.id));
     const toolLog = logs.find((log) => {
