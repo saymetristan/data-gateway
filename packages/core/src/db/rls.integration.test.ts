@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { records, sources, workspaces } from './schema/index.js';
+import {
+  records,
+  sourceRetrievalPolicies,
+  sources,
+  workspaces,
+} from './schema/index.js';
 import { withWorkspaceContext, workspaceRlsRoleExists } from './rls.js';
 import { withTestDatabase } from '../test/db-helper.js';
 
@@ -84,6 +89,74 @@ describe.runIf(hasDatabase)('rls integration', () => {
 
       const rows = await db.select().from(records);
       expect(rows).toHaveLength(1);
+    });
+  });
+
+  it('isolates retrieval policies by workspace', async () => {
+    await withTestDatabase(async (db) => {
+      const [wsA, wsB] = await db
+        .insert(workspaces)
+        .values([
+          { name: 'Policy A', slug: `policy-rls-a-${Date.now()}`, settings: {} },
+          { name: 'Policy B', slug: `policy-rls-b-${Date.now()}`, settings: {} },
+        ])
+        .returning();
+      if (!wsA || !wsB) throw new Error('workspaces missing');
+      const [sourceA, sourceB] = await db
+        .insert(sources)
+        .values([
+          {
+            workspaceId: wsA.id,
+            type: 'csv',
+            name: 'A',
+            config: {},
+            maturityStatus: 'agent_ready',
+          },
+          {
+            workspaceId: wsB.id,
+            type: 'csv',
+            name: 'B',
+            config: {},
+            maturityStatus: 'agent_ready',
+          },
+        ])
+        .returning();
+      if (!sourceA || !sourceB) throw new Error('sources missing');
+
+      await db.insert(sourceRetrievalPolicies).values([
+        {
+          workspaceId: wsA.id,
+          sourceId: sourceA.id,
+          version: 1,
+          status: 'active',
+          document: { entities: [] },
+        },
+        {
+          workspaceId: wsB.id,
+          sourceId: sourceB.id,
+          version: 1,
+          status: 'active',
+          document: { entities: [] },
+        },
+      ]);
+
+      const scoped = await withWorkspaceContext(db, wsA.id, (tx) =>
+        tx.select().from(sourceRetrievalPolicies),
+      );
+      expect(scoped).toHaveLength(1);
+      expect(scoped[0]?.workspaceId).toBe(wsA.id);
+
+      await expect(
+        withWorkspaceContext(db, wsA.id, (tx) =>
+          tx.insert(sourceRetrievalPolicies).values({
+            workspaceId: wsA.id,
+            sourceId: sourceB.id,
+            version: 2,
+            status: 'draft',
+            document: { entities: [] },
+          }),
+        ),
+      ).rejects.toThrow();
     });
   });
 });

@@ -60,6 +60,7 @@ export const evalCaseResultSchema = z.object({
 export const evalRunResponseSchema = z.object({
   id: z.string().uuid(),
   evalSetId: z.string().uuid(),
+  retrievalPolicyId: z.string().uuid().nullable().optional(),
   status: evalRunStatusSchema,
   metrics: evalRunMetricsSchema,
   passed: z.array(evalCaseResultSchema),

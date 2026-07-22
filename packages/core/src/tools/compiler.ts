@@ -327,8 +327,8 @@ function buildSearchDescription(input: CompileToolsInput, filterNames: string[])
     `Busca ${label}${workspaceSuffix} usando texto libre y filtros estructurados (${filters}).`,
     `When to use: cuando el cliente quiere encontrar, comparar o filtrar ${label} por características, identificadores, disponibilidad o precio.`,
     'Never use for: modificar datos, confirmar compras, reservar, cobrar, cancelar pedidos o prometer disponibilidad sin resultados de la herramienta.',
-    'Success criteria: ok=true, status=success y data.results contiene resultados relevantes; usa los campos devueltos como fuente de verdad.',
-    'Fallback: si status=needs_more_info o no hay resultados, pide más detalle al cliente en vez de inventar datos.',
+    'Success criteria: ok=true, status=success, data.results relevantes y confidence calibrada aceptable; usa los campos devueltos como fuente de verdad.',
+    'Fallback: si status=needs_more_info (vacío o coincidencias débiles), pide un término exacto (nombre de tela/SKU) o reintenta con ese término; no inventes datos ni asumas que una lista no vacía es correcta.',
   ].join('\n');
 }
 

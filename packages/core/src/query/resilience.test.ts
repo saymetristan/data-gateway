@@ -94,11 +94,13 @@ describe('expandQueryWithSynonyms', () => {
     retapizar: ['tapiceria'],
   };
 
-  it('adds mapping synonyms without duplicating existing terms', () => {
+  it('reports synonym alternatives without concatenating into one conjunctive query', () => {
     const result = expandQueryWithSynonyms('vinipiel para retapizar', dictionary);
     expect(result.addedTerms).toContain('piel sintetica');
     expect(result.addedTerms).toContain('tapiceria');
-    expect(result.expanded).toContain('vinipiel para retapizar');
+    // Expanded text stays as the original; branches carry OR alternatives.
+    expect(result.expanded).toBe('vinipiel para retapizar');
+    expect(result.expanded.includes('piel sintetica')).toBe(false);
   });
 
   it('is a no-op when dictionary is empty or no terms match', () => {

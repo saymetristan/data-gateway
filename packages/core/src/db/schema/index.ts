@@ -4,6 +4,7 @@ export * from './sources.js';
 export * from './source-records-raw.js';
 export * from './source-profiles.js';
 export * from './mappings.js';
+export * from './retrieval-policies.js';
 export * from './records.js';
 export * from './record-embeddings.js';
 export * from './record-enrichments.js';

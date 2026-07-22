@@ -27,6 +27,7 @@ import {
 import { enqueueJob } from '../queue/boss.js';
 import { EVALS_RUN_JOB } from '../queue/jobs.js';
 import { executeQuery } from './query.js';
+import { getRetrievalPolicyById } from './retrieval-policies.js';
 import { getSourceForWorkspace } from './workspaces.js';
 import { maybeTransitionSourceMaturity, transitionSourceMaturity } from './maturity.js';
 
@@ -158,6 +159,7 @@ export async function queueEvalRun(
   workspaceId: string,
   evalSetId: string,
   connectionString: string,
+  retrievalPolicyId?: string,
 ): Promise<{ runId: string; jobId: string | null }> {
   const evalSet = await getEvalSetWithCases(db, workspaceId, evalSetId);
   if (evalSet.cases.length === 0) {
@@ -168,11 +170,24 @@ export async function queueEvalRun(
   if (queryableSources.length === 0) {
     throw GatewayError.conflict('No queryable sources found for workspace');
   }
+  if (retrievalPolicyId) {
+    const policy = await getRetrievalPolicyById(
+      db,
+      workspaceId,
+      retrievalPolicyId,
+    );
+    if (!evalSet.sourceId || evalSet.sourceId !== policy.sourceId) {
+      throw GatewayError.conflict(
+        'Retrieval policy eval requires the source-specific eval set for that source',
+      );
+    }
+  }
 
   const [run] = await db
     .insert(evalRuns)
     .values({
       evalSetId: evalSet.id,
+      retrievalPolicyId: retrievalPolicyId ?? null,
       status: 'running',
       metrics: {},
       passed: [],
@@ -262,6 +277,9 @@ export async function runEvalSet(
           ...(row.evalSet.sourceId ? { sourceId: row.evalSet.sourceId } : {}),
         },
         embeddingProvider,
+        ...(row.run.retrievalPolicyId
+          ? { retrievalPolicyId: row.run.retrievalPolicyId }
+          : {}),
         ...(llmProvider ? { llmProvider } : {}),
       });
       const latencyMs = Date.now() - started;
@@ -357,7 +375,11 @@ export async function runEvalSet(
       })
       .where(eq(evalRuns.id, evalRunId));
 
-    if (metrics.score >= row.evalSet.threshold && metrics.sensitiveLeaks === 0) {
+    if (
+      !row.run.retrievalPolicyId &&
+      metrics.score >= row.evalSet.threshold &&
+      metrics.sensitiveLeaks === 0
+    ) {
       await promoteSourcesAfterEvalPass(db, workspaceId, row.evalSet, evalRunId);
     }
   } catch (error) {
@@ -407,7 +429,13 @@ export async function getLatestCompletedEvalRun(
   const [run] = await db
     .select()
     .from(evalRuns)
-    .where(and(eq(evalRuns.evalSetId, evalSetId), eq(evalRuns.status, 'completed')))
+    .where(
+      and(
+        eq(evalRuns.evalSetId, evalSetId),
+        eq(evalRuns.status, 'completed'),
+        isNull(evalRuns.retrievalPolicyId),
+      ),
+    )
     .orderBy(desc(evalRuns.finishedAt))
     .limit(1);
 

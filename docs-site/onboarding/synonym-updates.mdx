@@ -1,0 +1,83 @@
+---
+title: 'Actualizar Sinónimos'
+description: 'Flujo self-service para crear, evaluar, activar y revertir vocabulario sin reindex.'
+---
+
+# Actualizar Sinónimos sin Reindex
+
+La API de políticas permite que un cliente mantenga su vocabulario sin regenerar el catálogo. La key debe tener `retrieval:read` y `retrieval:write`; los evals usan el set específico del source.
+
+## 1. Consultar la versión activa
+
+```bash
+curl "https://data.whaapy.com/sources/$SOURCE_ID/retrieval-policies/active" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+Si devuelve `{ "policy": null }`, el source aún usa los sinónimos del mapping y `expectedActiveVersion` debe ser `0`.
+
+## 2. Crear un draft
+
+```bash
+curl -X POST "https://data.whaapy.com/sources/$SOURCE_ID/retrieval-policies" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "expectedActiveVersion": 0,
+    "document": {
+      "entities": [{
+        "entity": "variant",
+        "synonyms": {
+          "entries": {
+            "aida": ["cuadrille aida", "cuadrille"],
+            "punto de cruz": ["aida", "etamina", "caneva"]
+          }
+        }
+      }]
+    }
+  }'
+```
+
+La respuesta incluye una versión, por ejemplo `1`, con status `draft`. El documento es un reemplazo completo para los sinónimos de las entidades incluidas; envía el vocabulario que deseas conservar, no solo el delta.
+
+## 3. Evaluar sin afectar tráfico
+
+```bash
+curl -X POST \
+  "https://data.whaapy.com/sources/$SOURCE_ID/retrieval-policies/1/eval" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+
+curl "https://data.whaapy.com/evals/runs/$RUN_ID" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+Espera `status: completed`, `metrics.score >= threshold` y `metrics.sensitiveLeaks: 0`. Las consultas del eval reciben el draft explícitamente; el tráfico MCP continúa usando la versión activa.
+
+## 4. Activar
+
+```bash
+curl -X POST \
+  "https://data.whaapy.com/sources/$SOURCE_ID/retrieval-policies/1/activate" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"expectedActiveVersion": 0}'
+```
+
+La activación cambia un puntero transaccional en O(1). No se encola `source.index`, no se generan embeddings y el source conserva `agent_ready`.
+
+## Rollback
+
+Lista las versiones y activa la anterior que ya tenga un eval aprobado:
+
+```bash
+curl "https://data.whaapy.com/sources/$SOURCE_ID/retrieval-policies" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+
+curl -X POST \
+  "https://data.whaapy.com/sources/$SOURCE_ID/retrieval-policies/1/activate" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"expectedActiveVersion": 2}'
+```
+
+Un `409` indica versión activa desactualizada, eval faltante, score insuficiente o leaks. Un `400` indica términos, entidades o tamaños inválidos.

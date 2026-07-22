@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { GatewayClient, ToolManifest } from './client.js';
-import { createGatewayMcpServer } from './server.js';
+import {
+  createGatewayMcpServer,
+  isWeakSearchResult,
+  WEAK_SEARCH_CONFIDENCE_THRESHOLD,
+} from './server.js';
 
 const manifest: ToolManifest = {
   workspaceId: '11111111-1111-4111-8111-111111111111',
@@ -35,5 +39,50 @@ describe('createGatewayMcpServer', () => {
     const server = await createGatewayMcpServer(client);
     expect(server.isConnected()).toBe(false);
     expect(client.fetchManifest).toHaveBeenCalledOnce();
+  });
+});
+
+describe('isWeakSearchResult', () => {
+  it('rejects empty lists via empty path, not weak path', () => {
+    expect(
+      isWeakSearchResult({ kind: 'search', results: [], confidence: 0.1 }),
+    ).toBe(false);
+  });
+
+  it('flags non-empty low-confidence search as weak', () => {
+    expect(
+      isWeakSearchResult({
+        kind: 'search',
+        results: [{ id: 'a' }],
+        confidence: WEAK_SEARCH_CONFIDENCE_THRESHOLD - 0.01,
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts calibrated confidence at or above the threshold', () => {
+    expect(
+      isWeakSearchResult({
+        kind: 'search',
+        results: [{ id: 'a' }],
+        confidence: WEAK_SEARCH_CONFIDENCE_THRESHOLD,
+      }),
+    ).toBe(false);
+    expect(
+      isWeakSearchResult({
+        kind: 'search',
+        results: [{ id: 'a' }],
+        confidence: 0.72,
+      }),
+    ).toBe(false);
+  });
+
+  it('ignores non-search payloads', () => {
+    expect(
+      isWeakSearchResult({
+        kind: 'check_availability',
+        available: true,
+        confidence: 0.1,
+      }),
+    ).toBe(false);
   });
 });

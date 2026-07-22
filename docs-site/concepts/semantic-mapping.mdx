@@ -86,7 +86,7 @@ En la entidad:
 }
 ```
 
-Los sinónimos viven en el mapping del workspace (no hay diccionario global hardcodeado).
+Estos sinónimos del mapping son el fallback de compatibilidad. Para cambios frecuentes, una [política de retrieval](/concepts/retrieval-policies) activa reemplaza `entries` por entidad en query-time, sin reindex. No existe un diccionario global hardcodeado.
 
 ### Filtros por Defecto (Default Filters)
 

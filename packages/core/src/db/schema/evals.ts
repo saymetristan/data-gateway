@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { pgTable, uuid, text, jsonb, doublePrecision, timestamp, index, pgEnum, uniqueIndex } from 'drizzle-orm/pg-core';
 import { workspaces } from './workspaces.js';
 import { sources } from './sources.js';
+import { sourceRetrievalPolicies } from './retrieval-policies.js';
 
 export const evalRunStatusEnum = pgEnum('eval_run_status', ['running', 'completed', 'failed']);
 
@@ -55,6 +56,10 @@ export const evalRuns = pgTable(
     evalSetId: uuid('eval_set_id')
       .notNull()
       .references(() => evalSets.id, { onDelete: 'cascade' }),
+    retrievalPolicyId: uuid('retrieval_policy_id').references(
+      () => sourceRetrievalPolicies.id,
+      { onDelete: 'set null' },
+    ),
     status: evalRunStatusEnum('status').notNull(),
     metrics: jsonb('metrics').notNull().default({}),
     passed: jsonb('passed'),
@@ -62,7 +67,10 @@ export const evalRuns = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  (table) => [index('eval_runs_eval_set_id_idx').on(table.evalSetId)],
+  (table) => [
+    index('eval_runs_eval_set_id_idx').on(table.evalSetId),
+    index('eval_runs_retrieval_policy_id_idx').on(table.retrievalPolicyId),
+  ],
 );
 
 export type EvalSet = typeof evalSets.$inferSelect;

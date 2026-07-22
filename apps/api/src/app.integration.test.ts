@@ -5,6 +5,7 @@ import {
   closeDb,
   runMigrations,
   apiKeys,
+  mappings,
   sourceProfiles,
   sources,
   workspaces,
@@ -131,6 +132,138 @@ describe.runIf(hasDatabase)('API integration', () => {
       },
       body: JSON.stringify({ evalSetId: crypto.randomUUID() }),
     });
+    expect(res.status).toBe(401);
+  });
+
+  it('uses dedicated retrieval scopes and creates policy drafts without changing maturity', async () => {
+    const wsRes = await app.request('/workspaces', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Retrieval Policy Scope',
+        slug: `retrieval-policy-${Date.now()}`,
+      }),
+    });
+    expect(wsRes.status).toBe(201);
+    const workspace = (await wsRes.json()) as { id: string };
+
+    const keyRes = await app.request(`/workspaces/${workspace.id}/api-keys`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ scopes: ['retrieval:read', 'retrieval:write'] }),
+    });
+    expect(keyRes.status).toBe(201);
+    const { key } = (await keyRes.json()) as { key: string };
+
+    const [source] = await db
+      .insert(sources)
+      .values({
+        workspaceId: workspace.id,
+        type: 'csv',
+        name: 'Retrieval Source',
+        config: {},
+        maturityStatus: 'agent_ready',
+      })
+      .returning();
+    if (!source) throw new Error('source missing');
+    await db.insert(mappings).values({
+      sourceId: source.id,
+      version: 1,
+      status: 'active',
+      document: {
+        entities: [
+          {
+            entity: 'variant',
+            sourceTable: 'variants',
+            fields: [],
+            rules: [],
+            embeddingTextTemplate: '{{productTitle}}',
+          },
+        ],
+      },
+    });
+
+    const createRes = await app.request(
+      `/sources/${source.id}/retrieval-policies`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          expectedActiveVersion: 0,
+          document: {
+            entities: [
+              {
+                entity: 'variant',
+                synonyms: { entries: { aida: ['cuadrille aida'] } },
+              },
+            ],
+          },
+        }),
+      },
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as {
+      version: number;
+      status: string;
+    };
+    expect(created).toMatchObject({ version: 1, status: 'draft' });
+
+    const listRes = await app.request(
+      `/sources/${source.id}/retrieval-policies`,
+      { headers: { Authorization: `Bearer ${key}` } },
+    );
+    expect(listRes.status).toBe(200);
+    expect((await listRes.json()) as unknown[]).toHaveLength(1);
+
+    const [unchanged] = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.id, source.id));
+    expect(unchanged?.maturityStatus).toBe('agent_ready');
+  });
+
+  it('rejects retrieval policy writes without retrieval:write', async () => {
+    const wsRes = await app.request('/workspaces', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'No Retrieval Scope',
+        slug: `no-retrieval-${Date.now()}`,
+      }),
+    });
+    const workspace = (await wsRes.json()) as { id: string };
+    const keyRes = await app.request(`/workspaces/${workspace.id}/api-keys`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ scopes: ['sources:write'] }),
+    });
+    const { key } = (await keyRes.json()) as { key: string };
+    const res = await app.request(
+      '/sources/11111111-1111-4111-8111-111111111111/retrieval-policies',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      },
+    );
     expect(res.status).toBe(401);
   });
 

@@ -186,13 +186,16 @@ curl -X POST http://localhost:3000/query \
 ### Confidence (determinístico, sin LLM)
 
 ```
-confidence = 0.35·scoreGap + 0.25·filterCoverage + 0.25·lexicalOverlap + 0.15·resultFill
+confidence = 0.25·scoreGap + 0.15·filterCoverage + 0.20·lexicalOverlap
+           + 0.25·distinctiveCoverage + 0.15·resultFill
 ```
 
-- **scoreGap**: gap relativo entre score RRF #1 y #2
+- **scoreGap**: gap relativo entre score RRF #1 y #2 (no uses el score RRF absoluto como umbral)
 - **filterCoverage**: filtros aplicados / filtros pedidos (1 si no hubo filtros)
-- **lexicalOverlap**: 1 si el top result matcheó el tsquery
+- **lexicalOverlap**: 1 si el top result matcheó una rama lexical/tsquery
+- **distinctiveCoverage**: fracción de términos distintivos de la query presentes en el top hit
 - **resultFill**: `min(1, results.length / limit)`
+- Fallback vector-only sin cobertura distintiva se acota (`≤ 0.42`) para no parecer un match fuerte
 
 ### Fallbacks
 
@@ -263,6 +266,28 @@ curl -X POST http://localhost:3000/sources/{source_id}/activate \
 Si `GET /evals/runs/:id` devuelve un run `running` con `stale: true`, el worker probablemente murió o perdió el job después de tomarlo. Re-encola el run o crea uno nuevo; `runEvalSet` es idempotente y no reprocesa runs que ya no están en `running`.
 
 Fixture: `fixtures/ecommerce-evals.json` (24 cases para el catálogo de prueba).
+
+## Retrieval policies (sinónimos hot-update)
+
+Scopes: `retrieval:read`, `retrieval:write`.
+
+```bash
+# Crear draft inmutable
+curl -X POST http://localhost:3000/sources/{source_id}/retrieval-policies \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY" \
+  -d @fixtures/bayon-retrieval-policy.json
+
+# Evaluar el draft v1 contra el eval set específico del source
+curl -X POST http://localhost:3000/sources/{source_id}/retrieval-policies/1/eval \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY"
+
+# Activar al aprobar; expectedActiveVersion=0 para la primera policy
+curl -X POST http://localhost:3000/sources/{source_id}/retrieval-policies/1/activate \
+  -H "Authorization: Bearer $WORKSPACE_API_KEY" \
+  -d '{"expectedActiveVersion":0}'
+```
+
+Activar o restaurar una policy cambia la configuración de query en O(1): no modifica records, embeddings ni `maturity_status`. Sin policy activa, el Gateway conserva los sinónimos del mapping legacy.
 
 ## Shopify (Fase 5)
 

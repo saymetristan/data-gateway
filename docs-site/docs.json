@@ -18,10 +18,7 @@
     "groups": [
       {
         "group": "Get Started",
-        "pages": [
-          "introduction",
-          "quickstart"
-        ]
+        "pages": ["introduction", "quickstart"]
       },
       {
         "group": "Concepts",
@@ -30,6 +27,7 @@
           "concepts/source-maturity",
           "concepts/semantic-mapping",
           "concepts/ranking-and-preferences",
+          "concepts/retrieval-policies",
           "concepts/evals-quality-gate",
           "concepts/tools-and-query",
           "concepts/security"
@@ -43,6 +41,7 @@
           "onboarding/shopify",
           "onboarding/csv",
           "onboarding/mapping-guide",
+          "onboarding/synonym-updates",
           "onboarding/activation-checklist"
         ]
       },
@@ -60,10 +59,7 @@
       },
       {
         "group": "API Reference",
-        "pages": [
-          "api-reference/authentication",
-          "api-reference/scopes"
-        ]
+        "pages": ["api-reference/authentication", "api-reference/scopes"]
       }
     ]
   }

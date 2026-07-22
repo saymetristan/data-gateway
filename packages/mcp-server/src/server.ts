@@ -2,6 +2,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { GatewayClientError, type GatewayClient } from './client.js';
 import { jsonSchemaToZodShape } from './schema-to-zod.js';
 
+/** Calibrated confidence floor — never absolute RRF score magnitude. */
+export const WEAK_SEARCH_CONFIDENCE_THRESHOLD = 0.45;
+
 type WhaapyToolEnvelope = {
   ok: boolean;
   status: 'success' | 'needs_more_info' | 'failed';
@@ -77,6 +80,19 @@ function toSuccessEnvelope(
     };
   }
 
+  if (isWeakSearchResult(data)) {
+    return {
+      ok: false,
+      status: 'needs_more_info',
+      data,
+      nextQuestion:
+        'Encontré coincidencias débiles que pueden no ser lo que buscas. ¿Me das el nombre exacto del producto (por ejemplo Aida, cuadrillé, etamina) o un SKU?',
+      toolName,
+      safety: 'read_only',
+      durationMs,
+    };
+  }
+
   return {
     ok: true,
     status: 'success',
@@ -90,7 +106,31 @@ function toSuccessEnvelope(
 function isEmptySearchResult(data: unknown): boolean {
   if (!data || typeof data !== 'object') return false;
   const maybeResult = data as { kind?: unknown; results?: unknown };
-  return maybeResult.kind === 'search' && Array.isArray(maybeResult.results) && maybeResult.results.length === 0;
+  return (
+    maybeResult.kind === 'search' &&
+    Array.isArray(maybeResult.results) &&
+    maybeResult.results.length === 0
+  );
+}
+
+/**
+ * Non-empty search with calibrated low confidence is not a hard success.
+ * Downstream middleware should treat needs_more_info as a signal to ask the
+ * customer for a distinctive term or retry with a shorter query.
+ */
+export function isWeakSearchResult(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const maybeResult = data as {
+    kind?: unknown;
+    results?: unknown;
+    confidence?: unknown;
+  };
+  if (maybeResult.kind !== 'search') return false;
+  if (!Array.isArray(maybeResult.results) || maybeResult.results.length === 0) {
+    return false;
+  }
+  if (typeof maybeResult.confidence !== 'number') return false;
+  return maybeResult.confidence < WEAK_SEARCH_CONFIDENCE_THRESHOLD;
 }
 
 function toErrorEnvelope(toolName: string, error: unknown, durationMs: number): WhaapyToolEnvelope {

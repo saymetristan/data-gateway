@@ -2,6 +2,10 @@ import { sql, type SQL } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import type { EmbeddingProvider } from '../providers/embeddings.js';
 import type { NormalizedFilter, QueryType } from '../schemas/query.js';
+import {
+  buildLexicalBranches,
+  type LexicalBranch,
+} from './lexical-branches.js';
 import { isShortSkuLikeQuery } from './text-utils.js';
 import { reciprocalRankFusion } from './rrf.js';
 
@@ -11,6 +15,8 @@ const VECTOR_PROBE_LIMIT = 200;
 const HNSW_EF_SEARCH = 100;
 const HNSW_MAX_SCAN_TUPLES = 1_000;
 const TRIGRAM_THRESHOLD = 0.3;
+/** Cap parallel distinctive/synonym branches to keep latency bounded. */
+const MAX_LEXICAL_BRANCHES = 6;
 
 /** Default RRF weights: slight lexical bias when vector is late/noisy. */
 export const DEFAULT_LEXICAL_RRF_WEIGHT = 1;
@@ -50,6 +56,10 @@ export type HybridSearchInput = {
   vectorWeight?: number;
   /** Optional precomputed lexical rows (parallel path). */
   precomputedLexicalRows?: RawRecordRow[];
+  /** Optional synonym dictionary for multi-branch lexical expansion. */
+  synonymDictionary?: Record<string, string[]>;
+  /** Optional precomputed lexical branches (parallel path). */
+  lexicalBranches?: LexicalBranch[];
 };
 
 export type HybridSearchResult = {
@@ -80,6 +90,8 @@ export type RetrievalScope = {
   filterableFields: Set<string>;
   freeText: string;
   limit: number;
+  synonymDictionary?: Record<string, string[]>;
+  lexicalBranches?: LexicalBranch[];
 };
 
 export async function hybridSearch(input: HybridSearchInput): Promise<HybridSearchResult> {
@@ -164,9 +176,87 @@ export async function hybridSearch(input: HybridSearchInput): Promise<HybridSear
 }
 
 export async function lexicalSearch(scope: RetrievalScope): Promise<RawRecordRow[]> {
-  const where = buildWhereClause(scope);
   const queryText = scope.freeText.trim();
-  const useTrigram = isShortSkuLikeQuery(queryText);
+  if (!queryText) return [];
+
+  const branches =
+    scope.lexicalBranches ??
+    buildLexicalBranches(queryText, scope.synonymDictionary ?? {});
+  const limitedBranches = selectLexicalBranches(branches);
+
+  // Single short query: keep the direct path (incl. SKU trigram).
+  if (limitedBranches.length <= 1) {
+    return lexicalSearchSingle(scope, queryText);
+  }
+
+  return lexicalSearchMultiBranch(scope, limitedBranches);
+}
+
+/**
+ * Run weighted multi-branch lexical retrieval and fuse with RRF so a
+ * distinctive term like "Aida" can surface even when the full conversational
+ * phrase has zero conjunctive FTS matches.
+ */
+export async function lexicalSearchMultiBranch(
+  scope: RetrievalScope,
+  branches: LexicalBranch[],
+): Promise<RawRecordRow[]> {
+  const rowById = new Map<string, RawRecordRow>();
+  const rankings: Array<{ ids: string[]; weight: number }> = [];
+
+  // Sequential to reuse one DB connection / RLS context; branch count is capped.
+  for (const branch of branches) {
+    const rows = await lexicalSearchSingle(scope, branch.text);
+    const ids: string[] = [];
+    for (const row of rows) {
+      ids.push(row.id);
+      const existing = rowById.get(row.id);
+      if (!existing || (row.rank ?? 0) > (existing.rank ?? 0)) {
+        rowById.set(row.id, {
+          ...row,
+          lexical_match: true,
+        });
+      } else {
+        rowById.set(row.id, { ...existing, lexical_match: true });
+      }
+    }
+    if (ids.length > 0) {
+      rankings.push({ ids, weight: branch.weight });
+    }
+  }
+
+  if (rankings.length === 0) return [];
+
+  const fused = reciprocalRankFusion(rankings);
+  return fused.slice(0, LEXICAL_CANDIDATE_LIMIT).map((item) => {
+    const row = rowById.get(item.id);
+    if (!row) {
+      return {
+        id: item.id,
+        entity: '',
+        source_id: '',
+        data: {},
+        search_source: '',
+        rank: item.score,
+        lexical_match: true,
+      };
+    }
+    return {
+      ...row,
+      rank: item.score,
+      lexical_match: true,
+    };
+  });
+}
+
+export async function lexicalSearchSingle(
+  scope: RetrievalScope,
+  queryText: string,
+): Promise<RawRecordRow[]> {
+  const where = buildWhereClause(scope);
+  const trimmed = queryText.trim();
+  if (!trimmed) return [];
+  const useTrigram = isShortSkuLikeQuery(trimmed);
 
   const result = await scope.db.execute(sql`
     SELECT
@@ -177,20 +267,31 @@ export async function lexicalSearch(scope: RetrievalScope): Promise<RawRecordRow
       r.search_source,
       ts_rank_cd(
         r.search_text,
-        websearch_to_tsquery('es_unaccent', public.f_unaccent(${queryText}))
+        websearch_to_tsquery('es_unaccent', public.f_unaccent(${trimmed}))
       ) AS rank,
-      (r.search_text @@ websearch_to_tsquery('es_unaccent', public.f_unaccent(${queryText}))) AS lexical_match
+      (r.search_text @@ websearch_to_tsquery('es_unaccent', public.f_unaccent(${trimmed}))) AS lexical_match
     FROM records r
     WHERE ${where}
       AND (
-        r.search_text @@ websearch_to_tsquery('es_unaccent', public.f_unaccent(${queryText}))
-        ${useTrigram ? sql`OR similarity(r.search_source, ${queryText}) > ${TRIGRAM_THRESHOLD}` : sql``}
+        r.search_text @@ websearch_to_tsquery('es_unaccent', public.f_unaccent(${trimmed}))
+        ${useTrigram ? sql`OR similarity(r.search_source, ${trimmed}) > ${TRIGRAM_THRESHOLD}` : sql``}
       )
     ORDER BY rank DESC, r.updated_at DESC
     LIMIT ${LEXICAL_CANDIDATE_LIMIT}
   `);
 
   return rowsFromResult(result);
+}
+
+export function selectLexicalBranches(branches: LexicalBranch[]): LexicalBranch[] {
+  if (branches.length <= MAX_LEXICAL_BRANCHES) return branches;
+
+  const full = branches.filter((branch) => branch.kind === 'full');
+  const rest = branches
+    .filter((branch) => branch.kind !== 'full')
+    .sort((a, b) => b.weight - a.weight || a.text.localeCompare(b.text));
+  const budget = Math.max(0, MAX_LEXICAL_BRANCHES - full.length);
+  return [...full, ...rest.slice(0, budget)];
 }
 
 export async function vectorSearchForSource(
@@ -408,6 +509,8 @@ function toScope(input: HybridSearchInput): RetrievalScope {
     filterableFields: input.filterableFields,
     freeText: input.freeText,
     limit: input.limit,
+    ...(input.synonymDictionary ? { synonymDictionary: input.synonymDictionary } : {}),
+    ...(input.lexicalBranches ? { lexicalBranches: input.lexicalBranches } : {}),
   };
 }
 

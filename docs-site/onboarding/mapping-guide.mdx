@@ -104,8 +104,10 @@ curl -X POST "https://data.whaapy.com/sources/{source_id}/index" \
 Dependiendo del volumen, tarda segundos o minutos. Al terminar, el estado será `indexed`.
 
 <Warning>
-  Cambiar `retrieval.synonyms`, `searchWeight` o qué campos son `searchable` exige reindex.
-  Solo regenera embeddings si cambió `embeddingTextTemplate` o los datos del template.
+  Cambiar `searchWeight`, reglas o qué campos son `searchable` exige reindex.
+  Para sinónimos usa [políticas de retrieval](/onboarding/synonym-updates): se evalúan
+  y activan sin reindex. Solo regenera embeddings si cambió
+  `embeddingTextTemplate` o los datos del template.
 </Warning>
 
 Siguiente: [Checklist de Activación](/onboarding/activation-checklist).

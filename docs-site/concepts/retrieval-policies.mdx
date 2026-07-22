@@ -1,0 +1,52 @@
+---
+title: 'Políticas de Retrieval'
+description: 'Actualiza sinónimos en caliente sin reindexar ni sacar la fuente de agent_ready.'
+---
+
+# Políticas de Retrieval
+
+Una política de retrieval es un documento versionado, separado del mapping, que controla vocabulario de consulta. En la primera versión del contrato administra `synonyms.entries` por entidad.
+
+<Info>
+  Crear, evaluar o activar una política no modifica `records`, embeddings ni
+  `sources.maturityStatus`. Una fuente `agent_ready` permanece disponible durante todo el flujo.
+</Info>
+
+## Mapping vs. política
+
+Usa una política para cambios de vocabulario que solo afectan el query-time:
+
+- términos equivalentes del negocio;
+- nombres comerciales, regionalismos y errores frecuentes;
+- vocabulario estacional que ya existe en los campos indexados.
+
+Modifica el mapping y reindexa cuando cambien campos `searchable`, `searchWeight`, reglas, filtros, entidades o `embeddingTextTemplate`. Una política no puede hacer searchable un dato que no está en el índice.
+
+Al consultar, el Gateway carga en batch la política activa. Si la política contiene la entidad solicitada, sus sinónimos reemplazan los sinónimos legacy del mapping para esa entidad. Si no hay política o no cubre la entidad, conserva el mapping como fallback.
+
+## Estados y activación
+
+Cada versión es inmutable:
+
+```text
+draft → active → archived
+          ↑          |
+          └─ rollback┘
+```
+
+1. `POST /sources/{id}/retrieval-policies` crea un `draft`.
+2. `POST /sources/{id}/retrieval-policies/{version}/eval` ejecuta el eval set específico del source sin cambiar tráfico.
+3. `POST /sources/{id}/retrieval-policies/{version}/activate` exige `score >= threshold` y `sensitiveLeaks = 0`.
+4. Activar una versión archivada ya validada restaura esa versión en O(1).
+
+`expectedActiveVersion` implementa control de concurrencia optimista. Usa `0` al crear o activar la primera versión y la versión activa conocida en operaciones posteriores.
+
+## Seguridad y auditoría
+
+- Scopes mínimos: `retrieval:read` y `retrieval:write`.
+- RLS y validación de ownership por `workspace_id`.
+- Entidades limitadas a las que existen en el mapping activo.
+- Términos vacíos, auto-sinónimos y duplicados normalizados se rechazan.
+- Cada eval run conserva el `retrievalPolicyId` evaluado.
+
+Siguiente: [Actualizar sinónimos](/onboarding/synonym-updates).

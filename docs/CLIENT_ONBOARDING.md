@@ -131,6 +131,7 @@ Ajusta el mapping a la ontología del negocio (no uses el auto-mapping del scrip
 
 - Ecommerce genérico: `fixtures/shopify-mapping.json`
 - Bayon (sinónimos textiles + colección prefer): `fixtures/bayon-mapping.json`
+- Bayon evals (Aida/cuadrillé + consultas largas reales): `fixtures/bayon-evals.json`
 
 Cambios de `retrieval.synonyms` / pesos obligan nueva versión de mapping + reindex.
 ## 4. Index, evals, activate
@@ -196,12 +197,22 @@ SHOPIFY_CLIENT_ID=... SHOPIFY_CLIENT_SECRET=... SHOPIFY_WEBHOOK_SECRET=... \
   --name "Bayon" --slug bayon \
   --type shopify \
   --shop-domain bayon.myshopify.com \
-  --evals ./bayon-evals.json \
+  --evals ./fixtures/bayon-evals.json \
   --activate \
   --print-secrets
 ```
 
 Para producción, `--evals` debe contener casos reales del cliente con `expectedExternalIds`, `mustApplyFilters` o `mustNotContainFields`. No uses `fixtures/shopify-evals.json` para un catálogo real; esos IDs son del mock.
+
+## Sinónimos self-service después del onboarding
+
+Entrega una key separada con `retrieval:read` y `retrieval:write`. El cliente crea un draft en `POST /sources/:id/retrieval-policies`, ejecuta el eval focalizado y activa la versión aprobada. Este flujo no encola indexación, no regenera embeddings y conserva `agent_ready`.
+
+La policy es un documento completo por entidad, no un patch incremental. Para rollback, activa una versión `archived` previamente validada usando `expectedActiveVersion` para evitar pisar cambios concurrentes. Referencia pública: `docs-site/onboarding/synonym-updates.mdx`.
+
+## Middleware / Whaapy (defensa en profundidad)
+
+Ver [`docs/MIDDLEWARE_SEARCH_QUALITY.md`](MIDDLEWARE_SEARCH_QUALITY.md): no tratar HTTP 200 + lista no vacía como éxito; respetar `needs_more_info` cuando `confidence < 0.45` y reintentar con términos distintivos (Aida, cuadrillé, SKU).
 
 ## Monitoreo post-onboarding
 

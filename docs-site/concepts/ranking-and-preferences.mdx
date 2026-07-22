@@ -5,7 +5,7 @@ description: "Cómo cada negocio decide si un campo filtra duro, prioriza o qued
 
 # Ranking configurable por negocio
 
-El Gateway no hardcodea “prioridad por colección” ni sinónimos de un vertical. **La política vive en el mapping** de cada fuente: tú decides si categoría, marca, colección, ubicación, etc. **excluye**, **prioriza** o **solo aporta señal léxica**.
+El Gateway no hardcodea “prioridad por colección” ni sinónimos de un vertical. El mapping controla campos, filtros, preferencias y pesos; una [política de retrieval](/concepts/retrieval-policies) versionada puede reemplazar los sinónimos en query-time.
 
 ## Flujo de una consulta
 
@@ -140,7 +140,9 @@ Vocabulario **del negocio**, no global:
 ```
 
 - Los sinónimos expanden **solo la query léxica** (no el texto de embedding).
-- Cambiar sinónimos o `searchWeight` ⇒ nueva versión de mapping + **reindex**.
+- Para vocabulario nuevo, usa la [API de políticas](/onboarding/synonym-updates): no requiere reindex ni cambia `agent_ready`.
+- Los sinónimos del mapping quedan como fallback legacy si no hay una policy activa para la entidad.
+- Cambiar `searchWeight`, campos `searchable` o reglas sí exige mapping + **reindex**.
 - Regenerar embeddings solo si cambió `embeddingTextTemplate` (o datos del template).
 
 ## Tools MCP

@@ -4,18 +4,27 @@ import {
   createSourceSchema,
   createSourceWithValidation,
   createMappingSchema,
+  createRetrievalPolicySchema,
+  activateRetrievalPolicySchema,
   activateSource,
+  activateRetrievalPolicy,
+  createRetrievalPolicyDraft,
   createSourceMapping,
   enqueueJob,
   GatewayError,
   getActiveMapping,
+  getActiveRetrievalPolicy,
+  getApplicableEvalSet,
+  getRetrievalPolicyByVersion,
   getSourceForWorkspace,
   getSourceProfile,
   getSourceStatus,
   ingestCsvUpload,
+  listRetrievalPolicies,
   mappings,
   recordEmbeddings,
   records,
+  queueEvalRun,
   sourceRecordsRaw,
   SOURCE_INDEX_JOB,
   SOURCE_SYNC_EXPIRE_IN_HOURS,
@@ -164,6 +173,123 @@ export function sourceRoutes(deps: AppBindings) {
     return c.json(redactedProfile);
   });
 
+  routes.get(
+    '/:id/retrieval-policies',
+    requireScope('retrieval:read'),
+    async (c) => {
+      const db = c.get('db');
+      const workspaceId = c.get('workspaceId');
+      const sourceId = sourceIdParam(c.req.param('id'));
+      const policies = await listRetrievalPolicies(db, workspaceId, sourceId);
+      return c.json(policies.map(serializeRetrievalPolicy));
+    },
+  );
+
+  routes.get(
+    '/:id/retrieval-policies/active',
+    requireScope('retrieval:read'),
+    async (c) => {
+      const db = c.get('db');
+      const workspaceId = c.get('workspaceId');
+      const sourceId = sourceIdParam(c.req.param('id'));
+      const policy = await getActiveRetrievalPolicy(db, workspaceId, sourceId);
+      return c.json({ policy: policy ? serializeRetrievalPolicy(policy) : null });
+    },
+  );
+
+  routes.post(
+    '/:id/retrieval-policies',
+    requireScope('retrieval:write'),
+    async (c) => {
+      const body: unknown = await c.req.json();
+      const parsed = createRetrievalPolicySchema.safeParse(body);
+      if (!parsed.success) {
+        throw GatewayError.validation(
+          'Invalid retrieval policy payload',
+          parsed.error.flatten(),
+        );
+      }
+
+      const db = c.get('db');
+      const workspaceId = c.get('workspaceId');
+      const sourceId = sourceIdParam(c.req.param('id'));
+      const created = await createRetrievalPolicyDraft(
+        db,
+        workspaceId,
+        sourceId,
+        parsed.data,
+        c.get('apiKeyId'),
+      );
+      return c.json(serializeRetrievalPolicy(created), 201);
+    },
+  );
+
+  routes.post(
+    '/:id/retrieval-policies/:version/eval',
+    requireScope('retrieval:write'),
+    async (c) => {
+      const db = c.get('db');
+      const workspaceId = c.get('workspaceId');
+      const sourceId = sourceIdParam(c.req.param('id'));
+      const version = policyVersionParam(c.req.param('version'));
+      const policy = await getRetrievalPolicyByVersion(
+        db,
+        workspaceId,
+        sourceId,
+        version,
+      );
+      const evalSet = await getApplicableEvalSet(db, workspaceId, sourceId);
+      if (!evalSet || evalSet.sourceId !== sourceId) {
+        throw GatewayError.conflict(
+          'A source-specific eval set is required for retrieval policy validation',
+        );
+      }
+      const result = await queueEvalRun(
+        db,
+        workspaceId,
+        evalSet.id,
+        deps.env.DATABASE_URL,
+        policy.id,
+      );
+      return c.json(
+        {
+          runId: result.runId,
+          jobId: result.jobId,
+          retrievalPolicyVersion: version,
+          status: 'queued',
+        },
+        202,
+      );
+    },
+  );
+
+  routes.post(
+    '/:id/retrieval-policies/:version/activate',
+    requireScope('retrieval:write'),
+    async (c) => {
+      const body: unknown = await c.req.json().catch(() => ({}));
+      const parsed = activateRetrievalPolicySchema.safeParse(body);
+      if (!parsed.success) {
+        throw GatewayError.validation(
+          'Invalid retrieval policy activation payload',
+          parsed.error.flatten(),
+        );
+      }
+      const db = c.get('db');
+      const workspaceId = c.get('workspaceId');
+      const sourceId = sourceIdParam(c.req.param('id'));
+      const version = policyVersionParam(c.req.param('version'));
+      const activated = await activateRetrievalPolicy(
+        db,
+        workspaceId,
+        sourceId,
+        version,
+        parsed.data,
+      );
+      return c.json(serializeRetrievalPolicy(activated));
+    },
+  );
+
   routes.post('/:id/mapping', requireScope('sources:write'), async (c) => {
     const db = c.get('db');
     const workspaceId = c.get('workspaceId');
@@ -271,4 +397,38 @@ function sourceIdParam(value: string | undefined): string {
     throw GatewayError.validation('Missing source id');
   }
   return value;
+}
+
+function policyVersionParam(value: string | undefined): number {
+  const parsed = Number(value);
+  if (!value || !Number.isInteger(parsed) || parsed <= 0) {
+    throw GatewayError.validation('Invalid retrieval policy version');
+  }
+  return parsed;
+}
+
+function serializeRetrievalPolicy(policy: {
+  id: string;
+  workspaceId: string;
+  sourceId: string;
+  version: number;
+  status: string;
+  document: unknown;
+  createdByApiKeyId: string | null;
+  activatedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: policy.id,
+    workspaceId: policy.workspaceId,
+    sourceId: policy.sourceId,
+    version: policy.version,
+    status: policy.status,
+    document: policy.document,
+    createdByApiKeyId: policy.createdByApiKeyId,
+    activatedAt: policy.activatedAt?.toISOString() ?? null,
+    createdAt: policy.createdAt.toISOString(),
+    updatedAt: policy.updatedAt.toISOString(),
+  };
 }

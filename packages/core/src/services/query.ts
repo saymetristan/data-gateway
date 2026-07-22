@@ -25,6 +25,11 @@ import type {
 import { normalizeRequestFilters } from '../schemas/query.js';
 import { computeConfidence } from '../query/confidence.js';
 import { extractFilters, resolveExtractedMatches } from '../query/extract-filters.js';
+import {
+  computeDistinctiveTermCoverage,
+  extractDistinctiveTerms,
+  type LexicalBranch,
+} from '../query/lexical-branches.js';
 import { extractFiltersWithLlm } from '../query/llm-fallback.js';
 import { buildPreferenceCandidateFilterSets } from '../query/preference-candidates.js';
 import { buildRelaxedRetrievalState } from '../query/relax-filters.js';
@@ -44,7 +49,7 @@ import {
   summarizeSignals,
 } from '../query/rescore.js';
 import { shapeAppliedFilters, shapeRecordData } from '../query/shaping.js';
-import { expandQueryWithSynonyms } from '../query/synonyms.js';
+import { expandSynonymBranches } from '../query/synonyms.js';
 import { getFieldRetrieval } from '../schemas/mapping.js';
 import { getFilterableTargets } from '../mapping/metadata.js';
 import {
@@ -54,6 +59,13 @@ import {
 } from './query-embedding-cache.js';
 import { getActiveMapping } from './mappings.js';
 import { getSourceProfile } from './profile.js';
+import {
+  getActiveRetrievalPoliciesForSources,
+  getRetrievalPolicyById,
+  resolveEntitySynonyms,
+  type ActiveRetrievalPolicy,
+} from './retrieval-policies.js';
+import { retrievalPolicyDocumentSchema } from '../schemas/retrieval-policy.js';
 
 const QUERYABLE_MATURITY = new Set(['indexed', 'validated', 'agent_ready']);
 
@@ -70,6 +82,8 @@ export type ExecuteQueryInput = {
   softDeadlineMs?: number;
   hardTimeoutMs?: number;
   enableSynonymExpansion?: boolean;
+  /** Internal eval-only override. Draft policies never affect live traffic. */
+  retrievalPolicyId?: string;
   logContext?: {
     toolName?: string;
     mappingVersion?: number;
@@ -99,6 +113,7 @@ export type QueryResilienceMetadata = {
   relaxedFilters?: NormalizedFilter[];
   synonymDictVersion?: string | undefined;
   synonymTermsAdded?: string[] | undefined;
+  retrievalPolicyVersions?: Record<string, number> | undefined;
   rankingSignals?: Array<{ id: string; matched: string[] }> | undefined;
   softDeadlineMs: number;
   hardTimeoutMs: number;
@@ -130,6 +145,7 @@ type PreparedQuery = {
   fieldsByName: Map<string, MappingField>;
   synonymDictionary: Record<string, string[]>;
   synonymDictVersion?: string;
+  retrievalPolicyVersions: Record<string, number>;
   lexicalWeight: number;
   vectorWeight: number;
   embeddingsAvailableBySource: Map<string, boolean>;
@@ -190,6 +206,9 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
     );
     metadata.timings.prepareMs = Date.now() - prepareStarted;
     warnings.push(...prepared.warnings);
+    if (Object.keys(prepared.retrievalPolicyVersions).length > 0) {
+      metadata.retrievalPolicyVersions = prepared.retrievalPolicyVersions;
+    }
     appliedFilters = prepared.appliedFilters;
     appliedPreferences = prepared.appliedPreferences;
 
@@ -239,15 +258,22 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
     }
 
     const enableSynonyms = input.enableSynonymExpansion !== false;
-    let searchText = unresolvedText.trim();
-    if (enableSynonyms && searchText && Object.keys(prepared.synonymDictionary).length > 0) {
-      const expanded = expandQueryWithSynonyms(searchText, prepared.synonymDictionary);
-      if (expanded.addedTerms.length > 0) {
-        searchText = expanded.expanded;
-        metadata.synonymDictVersion = prepared.synonymDictVersion;
-        metadata.synonymTermsAdded = expanded.addedTerms;
-      }
+    const searchText = unresolvedText.trim();
+    const dictionary =
+      enableSynonyms && Object.keys(prepared.synonymDictionary).length > 0
+        ? prepared.synonymDictionary
+        : {};
+    const lexicalBranches: LexicalBranch[] = searchText
+      ? expandSynonymBranches(searchText, dictionary)
+      : [];
+    const synonymAlts = lexicalBranches
+      .filter((branch) => branch.kind === 'synonym_alt')
+      .map((branch) => branch.text);
+    if (synonymAlts.length > 0) {
+      metadata.synonymDictVersion = prepared.synonymDictVersion;
+      metadata.synonymTermsAdded = synonymAlts;
     }
+    const distinctiveTerms = extractDistinctiveTerms(searchText || input.request.query, dictionary);
 
     const hasFreeText = unresolvedText.trim().length > 0;
     const needsEmbedding =
@@ -256,20 +282,10 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
 
     // Free-text for a possible relaxation retry: original query (terms stripped by
     // over-eager implicit filters are restored for FTS).
-    let relaxedSearchText = input.request.query.trim();
-    if (
-      enableSynonyms &&
-      relaxedSearchText &&
-      Object.keys(prepared.synonymDictionary).length > 0
-    ) {
-      const expanded = expandQueryWithSynonyms(
-        relaxedSearchText,
-        prepared.synonymDictionary,
-      );
-      if (expanded.addedTerms.length > 0) {
-        relaxedSearchText = expanded.expanded;
-      }
-    }
+    const relaxedSearchText = input.request.query.trim();
+    const relaxedLexicalBranches = relaxedSearchText
+      ? expandSynonymBranches(relaxedSearchText, dictionary)
+      : [];
 
     if (!hasFreeText) {
       const response = await withWorkspaceContext(input.db, input.workspaceId, async (tx) => {
@@ -321,6 +337,8 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
             embeddingsAvailableBySource: prepared.embeddingsAvailableBySource,
             lexicalWeight: prepared.lexicalWeight,
             vectorWeight: prepared.vectorWeight,
+            synonymDictionary: dictionary,
+            lexicalBranches: relaxedLexicalBranches,
           });
           metadata.timings.fusionMs += Date.now() - retryStarted;
           warnings.push(...retrieval.warnings);
@@ -339,6 +357,8 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
           appliedPreferences,
           started,
           metadata,
+          distinctiveTerms,
+          hadFreeText: Boolean(relaxedSearchText),
         });
       });
       queryType = response.query_type;
@@ -359,6 +379,8 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
         filterableFields: prepared.filterableFields,
         freeText: searchText,
         limit: input.request.limit,
+        synonymDictionary: dictionary,
+        lexicalBranches,
       }),
     ).then((rows) => {
       metadata.timings.lexicalMs = Date.now() - parallelStarted;
@@ -446,6 +468,14 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
       const vectorRows = await runVector(prepared.safeFilters);
       metadata.timings.vectorMs = Date.now() - vectorStarted;
 
+      // When distinctive terms (Aida, cuadrillé, …) already hit lexically, bias
+      // RRF toward lexical so weak semantic neighbors cannot outrank exact matches.
+      const lexicalWeight = resolveLexicalFusionWeight(
+        prepared.lexicalWeight,
+        lexicalRows,
+        distinctiveTerms,
+      );
+
       const fusionStarted = Date.now();
       let retrieval =
         vectorRows.length > 0
@@ -453,7 +483,7 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
               lexicalRows,
               vectorRows,
               limit: candidateLimit,
-              lexicalWeight: prepared.lexicalWeight,
+              lexicalWeight,
               vectorWeight: prepared.vectorWeight,
             })
           : {
@@ -488,6 +518,8 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
             filterableFields: prepared.filterableFields,
             freeText: relaxedSearchText,
             limit: input.request.limit,
+            synonymDictionary: dictionary,
+            lexicalBranches: relaxedLexicalBranches,
           }),
           runVector(relaxed.filters),
         ]);
@@ -495,13 +527,18 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
         metadata.timings.vectorMs += Date.now() - retryStarted;
 
         const retryFusionStarted = Date.now();
+        const relaxedLexicalWeight = resolveLexicalFusionWeight(
+          prepared.lexicalWeight,
+          relaxedLexical,
+          distinctiveTerms,
+        );
         retrieval =
           relaxedVector.length > 0
             ? fuseLexicalAndVector({
                 lexicalRows: relaxedLexical,
                 vectorRows: relaxedVector,
                 limit: candidateLimit,
-                lexicalWeight: prepared.lexicalWeight,
+                lexicalWeight: relaxedLexicalWeight,
                 vectorWeight: prepared.vectorWeight,
               })
             : {
@@ -528,6 +565,8 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
         appliedPreferences,
         started,
         metadata,
+        distinctiveTerms,
+        hadFreeText: true,
       });
     });
 
@@ -795,6 +834,8 @@ async function finalizeResponse(args: {
   appliedPreferences: QueryPreference[];
   started: number;
   metadata: QueryResilienceMetadata;
+  distinctiveTerms: string[];
+  hadFreeText: boolean;
 }): Promise<QueryResponse> {
   const {
     input,
@@ -809,6 +850,8 @@ async function finalizeResponse(args: {
     appliedPreferences,
     started,
     metadata,
+    distinctiveTerms,
+    hadFreeText,
   } = args;
 
   const enrichedHits = await enrichPreferenceCandidates({
@@ -867,14 +910,37 @@ async function finalizeResponse(args: {
     data: shapeRecordData(hit.data, fieldMap.get(hit.entity) ?? []),
   }));
 
+  const topHit = rankedHits[0];
+  const topSearchText = topHit
+    ? [
+        typeof topHit.data.productTitle === 'string' ? topHit.data.productTitle : '',
+        typeof topHit.data.title === 'string' ? topHit.data.title : '',
+        typeof topHit.data.fabricType === 'string' ? topHit.data.fabricType : '',
+        typeof topHit.data.search_source === 'string' ? topHit.data.search_source : '',
+        Array.isArray(topHit.data.collections)
+          ? topHit.data.collections.filter((value): value is string => typeof value === 'string').join(' ')
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : undefined;
+  const distinctiveTermCoverage = computeDistinctiveTermCoverage(
+    distinctiveTerms,
+    topSearchText,
+  );
+  const anyLexicalHit = retrievalHits.some((hit) => hit.lexicalMatch);
+  const vectorOnlyFallback = hadFreeText && !anyLexicalHit && queryType === 'hybrid_search';
+
   const baseConfidence = computeConfidence({
     rankedScores: rankedHits.map((hit) => hit.score),
     requestedFilterCount:
       extractedFilters.length + normalizeRequestFilters(input.request.filters).length,
     appliedFilterCount: appliedFilters.length,
-    topLexicalMatch: rankedHits[0]?.lexicalMatch ?? false,
+    topLexicalMatch: topHit?.lexicalMatch ?? false,
     resultsCount: shapedResults.length,
     limit: input.request.limit,
+    distinctiveTermCoverage,
+    vectorOnlyFallback,
   });
   const confidence = preferenceFallback
     ? Number((baseConfidence * 0.5).toFixed(4))
@@ -970,6 +1036,29 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
   const mappingVersionBySource = new Map(
     queryable.map((source) => [source.id, source.mappingVersion]),
   );
+  const retrievalPolicies = await getActiveRetrievalPoliciesForSources(
+    db,
+    input.workspaceId,
+    sourceIds,
+  );
+  if (input.retrievalPolicyId) {
+    const override = await getRetrievalPolicyById(
+      db,
+      input.workspaceId,
+      input.retrievalPolicyId,
+    );
+    if (!sourceIds.includes(override.sourceId)) {
+      throw GatewayError.conflict(
+        'Retrieval policy does not belong to a queryable source in this request',
+      );
+    }
+    retrievalPolicies.set(override.sourceId, {
+      id: override.id,
+      sourceId: override.sourceId,
+      version: override.version,
+      document: retrievalPolicyDocumentSchema.parse(override.document),
+    });
+  }
 
   const allFields = collectAllFields(queryable, entityFilter);
   const fieldsByName = new Map(allFields.map((field) => [field.name, field]));
@@ -1050,7 +1139,11 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     warnings,
   );
 
-  const synonymConfig = collectSynonymDictionary(queryable, entityFilter);
+  const synonymConfig = collectSynonymDictionary(
+    queryable,
+    entityFilter,
+    retrievalPolicies,
+  );
   const rrf = collectRrfWeights(queryable, entityFilter);
 
   const embeddingsAvailableBySource = await resolveEmbeddingsAvailability(
@@ -1077,6 +1170,12 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     fieldsByName,
     synonymDictionary: synonymConfig.entries,
     ...(synonymConfig.version ? { synonymDictVersion: synonymConfig.version } : {}),
+    retrievalPolicyVersions: Object.fromEntries(
+      [...retrievalPolicies.values()].map((policy) => [
+        policy.sourceId,
+        policy.version,
+      ]),
+    ),
     lexicalWeight: rrf.lexicalWeight,
     vectorWeight: rrf.vectorWeight,
     embeddingsAvailableBySource,
@@ -1213,12 +1312,17 @@ function collectSoftPreferences(
 function collectSynonymDictionary(
   queryable: QueryableSource[],
   entity?: string,
+  policiesBySource: Map<string, ActiveRetrievalPolicy> = new Map(),
 ): { version?: string; entries: Record<string, string[]> } {
   const entries: Record<string, string[]> = {};
   let version: string | undefined;
   for (const source of queryable) {
     for (const entityDef of pickEntities(source.document, entity)) {
-      const synonyms = entityDef.retrieval?.synonyms;
+      const synonyms = resolveEntitySynonyms(
+        policiesBySource.get(source.id),
+        entityDef.entity,
+        entityDef.retrieval?.synonyms,
+      );
       if (!synonyms) continue;
       version = synonyms.version;
       for (const [term, list] of Object.entries(synonyms.entries)) {
@@ -1413,4 +1517,24 @@ async function writeQueryLog(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Prefer lexical RRF when distinctive query terms already matched catalog rows. */
+export function resolveLexicalFusionWeight(
+  baseWeight: number,
+  lexicalRows: Array<{ search_source?: string; data?: Record<string, unknown> }>,
+  distinctiveTerms: string[],
+): number {
+  if (distinctiveTerms.length === 0 || lexicalRows.length === 0) return baseWeight;
+  const anyDistinctiveHit = lexicalRows.some((row) => {
+    const text = [
+      row.search_source ?? '',
+      typeof row.data?.productTitle === 'string' ? row.data.productTitle : '',
+      typeof row.data?.title === 'string' ? row.data.title : '',
+    ].join(' ');
+    return computeDistinctiveTermCoverage(distinctiveTerms, text) > 0;
+  });
+  if (!anyDistinctiveHit) return baseWeight;
+  // Must beat default vectorWeight 1.1 on a shared top-1 RRF slot.
+  return Math.max(baseWeight, 1.45);
 }

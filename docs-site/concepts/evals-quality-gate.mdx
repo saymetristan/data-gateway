@@ -43,3 +43,7 @@ Para ranking (filtro vs preferencia), ver [Ranking y Preferencias](/concepts/ran
 Si el último resultado de evaluación ("run") supera el umbral y valida exitosamente los campos confidenciales (garantizando cero filtraciones de datos `sensitive`), la fuente pasa a estado `validated`.
 
 Solo en estado `validated` se te permitirá llamar al endpoint `POST /sources/:id/activate`, abriendo el acceso para los agentes MCP.
+
+## Evals de políticas de retrieval
+
+Una policy draft usa el mismo eval set específico del source, pero el run queda ligado a `retrievalPolicyId`. Las consultas se ejecutan contra el draft sin afectar tráfico. Aprobar este run habilita `POST /sources/:id/retrieval-policies/:version/activate`; no promociona ni degrada la madurez del source.

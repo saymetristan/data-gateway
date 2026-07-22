@@ -34,5 +34,5 @@ Llamaste de forma manual al endpoint de activación (`POST /sources/:id/activate
 ---
 
 <Note>
-Si modificas el Mapeo o reindexas una fuente que estaba en `agent_ready`, el estado de madurez regresará temporalmente a `indexed` o `mapped`. Será necesario correr de nuevo las evaluaciones y activarla para prevenir roturas en producción.
+Si modificas el mapping o reindexas una fuente que estaba en `agent_ready`, el estado regresará temporalmente a `indexed` o `mapped`. En cambio, crear, evaluar, activar o revertir una [política de retrieval](/concepts/retrieval-policies) no cambia la madurez ni regenera embeddings.
 </Note>

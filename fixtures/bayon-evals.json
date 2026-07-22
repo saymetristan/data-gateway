@@ -1,0 +1,87 @@
+{
+  "name": "Bayon Shopify QA",
+  "description": "Eval set for Bayon textile catalog: craft fabrics, long conversational queries, and ranking against accessories.",
+  "threshold": 0.8,
+  "cases": [
+    {
+      "query": "tela para bordar punto de cruz, Aida o canevá, manualidades",
+      "expectedExternalIds": [
+        "42764671811644",
+        "42764671909948",
+        "42764671942716",
+        "42764671877180",
+        "42764671844412",
+        "42764671778876"
+      ],
+      "mustRankAbove": [
+        { "higher": "42764671811644", "lower": "42764624724028" },
+        { "higher": "42764671811644", "lower": "42764622364732" }
+      ],
+      "mustNotContainFields": ["cost"]
+    },
+    {
+      "query": "Aida",
+      "expectedExternalIds": [
+        "42764671811644",
+        "42764671909948",
+        "42764671942716",
+        "42764671877180",
+        "42764671844412",
+        "42764671778876"
+      ],
+      "mustNotContainFields": ["cost"]
+    },
+    {
+      "query": "cuadrillé",
+      "expectedExternalIds": [
+        "42764671811644",
+        "42764671909948",
+        "42764671942716",
+        "42764671877180",
+        "42764671844412",
+        "42764671778876"
+      ],
+      "mustNotContainFields": ["cost"]
+    },
+    {
+      "query": "Cuadrille Aida",
+      "expectedExternalIds": [
+        "42764671811644",
+        "42764671909948",
+        "42764671942716",
+        "42764671877180",
+        "42764671844412",
+        "42764671778876"
+      ],
+      "mustNotContainFields": ["cost"]
+    },
+    {
+      "query": "etamina",
+      "expectedExternalIds": ["42764690587708"],
+      "mustNotContainFields": ["cost"]
+    },
+    {
+      "query": "disponible",
+      "mustApplyFilters": [{ "field": "available", "op": "eq", "value": true }],
+      "mustNotContainFields": ["cost"]
+    },
+    {
+      "query": "menos de 500",
+      "mustApplyFilters": [{ "field": "price", "op": "lt", "value": 500 }],
+      "mustNotContainFields": ["cost"]
+    },
+    {
+      "query": "color blanco",
+      "mustApplyFilters": [{ "field": "color", "op": "eq", "value": "Blanco" }],
+      "mustNotContainFields": ["cost"]
+    },
+    {
+      "query": "productos",
+      "mustNotContainFields": ["cost"]
+    },
+    {
+      "query": "talla grande",
+      "mustNotContainFields": ["cost"]
+    }
+  ]
+}

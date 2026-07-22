@@ -27,6 +27,13 @@ Si tu búsqueda está demorando mucho:
 - Es posible que la API central esté bajo mucha carga. Revisa la página de estado de los servicios.
 - Verifica si incluiste demasiados filtros complicados o si estás solicitando el procesamiento vectorial (`useLlmFallback: true`) para una cantidad masiva de datos en un índice que apenas está creándose.
 
+## El draft de sinónimos no se puede activar
+
+- Consulta `GET /evals/runs/{runId}`: debe estar `completed`, superar el `threshold` y tener `sensitiveLeaks: 0`.
+- El source necesita un eval set específico; un set global no valida políticas.
+- Un `409` con active version conflict indica que otro actor activó una versión. Lee `/retrieval-policies/active` y reintenta con el `expectedActiveVersion` actual.
+- Si la política está activa pero el término no encuentra datos, confirma que el dato destino ya estaba en un campo searchable. Las políticas no reindexan contenido.
+
 ## Respuestas extrañas de errores HTTP desde Whaapy
 
 Si estás haciendo Self-Host:

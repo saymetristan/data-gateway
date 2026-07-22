@@ -72,6 +72,66 @@ components:
           type: array
           items:
             type: string
+    RetrievalPolicyDocument:
+      type: object
+      required: [entities]
+      properties:
+        entities:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: object
+            required: [entity, synonyms]
+            properties:
+              entity:
+                type: string
+                example: variant
+              synonyms:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      minItems: 1
+                      maxItems: 20
+                      items:
+                        type: string
+                    example:
+                      aida: [cuadrille aida, cuadrille]
+                      punto de cruz: [aida, etamina]
+    RetrievalPolicy:
+      type: object
+      required:
+        [id, workspaceId, sourceId, version, status, document, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        sourceId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        status:
+          type: string
+          enum: [draft, active, archived]
+        document:
+          $ref: '#/components/schemas/RetrievalPolicyDocument'
+        activatedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
 security:
   - bearerAuth: []
 paths:
@@ -139,7 +199,7 @@ paths:
                   oneOf:
                     - type: object
                       additionalProperties: true
-                      description: Filtros legacy { campo: valor }
+                      description: "Filtros legacy { campo: valor }"
                     - type: array
                       items:
                         $ref: '#/components/schemas/NormalizedFilter'
@@ -184,6 +244,153 @@ paths:
       responses:
         "200":
           description: OK
+  /sources/{id}/retrieval-policies:
+    get:
+      summary: Listar políticas de retrieval
+      description: Lista versiones draft, active y archived. Requiere `retrieval:read`.
+      operationId: listRetrievalPolicies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Versiones de la política
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RetrievalPolicy'
+    post:
+      summary: Crear draft de política de retrieval
+      description: Crea una versión inmutable sin reindexar, re-embeddear ni cambiar `maturityStatus`. Requiere `retrieval:write`.
+      operationId: createRetrievalPolicyDraft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [document]
+              properties:
+                expectedActiveVersion:
+                  type: integer
+                  minimum: 0
+                  description: Control de concurrencia; usa 0 si todavía no existe una activa.
+                document:
+                  $ref: '#/components/schemas/RetrievalPolicyDocument'
+      responses:
+        "201":
+          description: Draft creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalPolicy'
+        "409":
+          description: Conflicto de versión activa
+        "400":
+          description: Documento o entidad inválida
+  /sources/{id}/retrieval-policies/active:
+    get:
+      summary: Obtener política de retrieval activa
+      description: "Devuelve `{ policy: null }` si el source todavía usa los sinónimos legacy del mapping. Requiere `retrieval:read`."
+      operationId: getActiveRetrievalPolicy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Política activa o null
+  /sources/{id}/retrieval-policies/{version}/eval:
+    post:
+      summary: Evaluar un draft de retrieval
+      description: Ejecuta el eval set específico del source contra el draft sin afectar tráfico. Requiere `retrieval:write`.
+      operationId: evalRetrievalPolicy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "202":
+          description: Eval encolado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId:
+                    type: string
+                    format: uuid
+                  jobId:
+                    type: [string, "null"]
+                  retrievalPolicyVersion:
+                    type: integer
+                  status:
+                    type: string
+                    enum: [queued]
+        "409":
+          description: El source no tiene eval set específico o casos
+  /sources/{id}/retrieval-policies/{version}/activate:
+    post:
+      summary: Activar o restaurar política de retrieval
+      description: Requiere un eval aprobado para esa versión. El cambio es O(1), conserva `agent_ready` y no toca records ni embeddings. Requiere `retrieval:write`.
+      operationId: activateRetrievalPolicy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedActiveVersion:
+                  type: integer
+                  minimum: 0
+      responses:
+        "200":
+          description: Política activa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalPolicy'
+        "409":
+          description: Eval faltante/fallido o conflicto de versión
   /sources/{id}/mapping:
     post:
       summary: Subir Mapping Semántico

@@ -155,6 +155,10 @@ Ejemplo de métricas de un smoke eval aprobado:
 
 Si el resultado cumple el `threshold` y no hubo violaciones de campos sensibles, la fuente avanzará automáticamente a `validated`.
 
+<Note>
+Este gate activa la fuente por primera vez o después de cambios de mapping/index. Para actualizar solo sinónimos de una fuente ya `agent_ready`, usa [políticas de retrieval](/onboarding/synonym-updates): el draft se evalúa por separado y la madurez no cambia.
+</Note>
+
 ## 4. Activación Final
 
 Llama al endpoint final de activación. **Este endpoint fallará si el estado no es `validated`.**

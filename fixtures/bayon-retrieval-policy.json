@@ -1,0 +1,28 @@
+{
+  "expectedActiveVersion": 0,
+  "document": {
+    "entities": [
+      {
+        "entity": "variant",
+        "synonyms": {
+          "entries": {
+            "vinipiel": ["piel sintetica", "cuero sintetico", "ecocuero"],
+            "piel sintetica": ["vinipiel", "ecocuero"],
+            "retapizar": ["tapiceria", "tapizar", "revestir"],
+            "tapiceria": ["retapizar", "tapizar"],
+            "loneta": ["canvas", "lona"],
+            "gabardina": ["twill"],
+            "chenille": ["chenila"],
+            "terciopelo": ["velvet"],
+            "antimancha": ["easy clean", "repelente"],
+            "aida": ["cuadrille aida", "cuadrille"],
+            "cuadrille": ["aida", "cuadrille aida"],
+            "etamina": ["caneva"],
+            "caneva": ["etamina"],
+            "punto de cruz": ["aida", "cuadrille", "etamina"]
+          }
+        }
+      }
+    ]
+  }
+}

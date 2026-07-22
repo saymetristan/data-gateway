@@ -31,16 +31,19 @@ Cuando la búsqueda retorna resultados válidos:
 ```
 
 `applied_preferences` solo aparece cuando hubo boosts blandos (NL con `inferredBehavior: "prefer"`, args `prefer_*`, o `preferences` en el request). Ver [Ranking y Preferencias](/concepts/ranking-and-preferences).
-## Formato cuando faltan datos (Búsqueda vacía)
+## Formato cuando faltan datos o la confianza es débil
 
-El Gateway es capaz de instruir proactivamente al agente cuando una búsqueda no produjo resultados, modificando el `status` e incluyendo el campo `nextQuestion` para darle instrucciones al LLM sobre cómo pedirle más detalles al usuario humano.
+El Gateway instruye al agente cuando una búsqueda no produjo resultados **o** cuando hay resultados pero la confianza calibrada es baja (`confidence < 0.45`). En ambos casos `status` pasa a `needs_more_info` e incluye `nextQuestion`.
+
+Una lista no vacía **no** implica éxito: coincidencias semánticas débiles (p. ej. aros/hilos cuando el cliente pidió Aida) también disparan `needs_more_info`, con `data.results` todavía disponible para inspección.
 
 ```json
 {
   "ok": false,
   "status": "needs_more_info",
   "data": {
-    "results": []
+    "results": [],
+    "confidence": 0.25
   },
   "nextQuestion": "No encontré resultados con esos datos. ¿Me compartes más detalle, otro identificador o una característica diferente?",
   "toolName": "search_product",

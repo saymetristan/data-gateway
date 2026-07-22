@@ -17,6 +17,8 @@ Cada API Key generada para un Workspace tiene asignada una matriz de permisos (`
 | `tools:invoke` | Permite ejecutar una de las tools compiladas del MCP. | `POST /tools/:name/invoke` |
 | `evals:read` | Permite listar y leer casos de evaluación. | `GET /evals/sets` |
 | `evals:write` | Permite definir, eliminar casos de evaluación y forzar corridas (runs). | `POST /evals/run` |
+| `retrieval:read` | Permite listar versiones y leer la política activa. | `GET /sources/:id/retrieval-policies` |
+| `retrieval:write` | Permite crear drafts, ejecutar su eval y activar o restaurar versiones. | `POST /sources/:id/retrieval-policies` |
 | `logs:read` | Permite descargar y auditar el uso de búsqueda. | `GET /query-logs` |
 
 ## Escenarios Recomendados
@@ -33,3 +35,11 @@ Si llamas al motor de búsqueda directamente desde tu propio código de Next.js,
 ```json
 ["query:execute"]
 ```
+
+**Editor de vocabulario del cliente:**
+
+```json
+["retrieval:read", "retrieval:write"]
+```
+
+Esta key no necesita `sources:write`: puede ajustar sinónimos evaluados, pero no cambiar mappings, indexar ni activar fuentes.

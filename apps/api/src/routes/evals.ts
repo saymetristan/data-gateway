@@ -155,6 +155,7 @@ export function evalRoutes(deps: AppBindings) {
     return c.json({
       id: run.id,
       evalSetId: run.evalSetId,
+      retrievalPolicyId: run.retrievalPolicyId,
       status: run.status,
       metrics: run.metrics,
       passed: run.passed,

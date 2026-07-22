@@ -213,7 +213,7 @@
       "embeddingTextTemplate": "{{productTitle}} {{title}} {{sku}} {{color}} {{size}} {{width}} {{collections}} {{fabricType}} {{style}} {{productType}}",
       "retrieval": {
         "synonyms": {
-          "version": "bayon-fabrics-v2",
+          "version": "bayon-fabrics-v3",
           "entries": {
             "vinipiel": ["piel sintetica", "cuero sintetico", "ecocuero"],
             "piel sintetica": ["vinipiel", "ecocuero"],
@@ -223,7 +223,14 @@
             "gabardina": ["twill"],
             "chenille": ["chenila"],
             "terciopelo": ["velvet"],
-            "antimancha": ["easy clean", "repelente"]
+            "antimancha": ["easy clean", "repelente"],
+            "aida": ["cuadrille aida", "cuadrille", "cuadrillé"],
+            "cuadrille": ["aida", "cuadrille aida", "cuadrillé"],
+            "cuadrillé": ["aida", "cuadrille aida", "cuadrille"],
+            "etamina": ["caneva", "canevá"],
+            "caneva": ["etamina", "canevá"],
+            "canevá": ["etamina", "caneva"],
+            "punto de cruz": ["aida", "cuadrille", "etamina"]
           }
         },
         "rrf": {

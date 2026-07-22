@@ -1,40 +1,36 @@
+import { buildLexicalBranches, type LexicalBranch } from './lexical-branches.js';
+
 /**
  * Expand free-text with a mapping-provided synonym dictionary.
- * Expansion is applied before lexical search only — never changes embedding text.
+ *
+ * Prefer {@link expandSynonymBranches}: appending synonyms to a single
+ * websearch query makes FTS more conjunctive and can reduce recall.
+ * Expansion never changes embedding text (caller responsibility).
  */
 export function expandQueryWithSynonyms(
   text: string,
   dictionary: Record<string, string[]> = {},
 ): { expanded: string; addedTerms: string[] } {
-  const trimmed = text.trim();
-  if (!trimmed || Object.keys(dictionary).length === 0) {
-    return { expanded: trimmed, addedTerms: [] };
-  }
+  const branches = expandSynonymBranches(text, dictionary);
+  const addedTerms = branches
+    .filter((branch) => branch.kind === 'synonym_alt')
+    .map((branch) => branch.text)
+    .sort((a, b) => a.localeCompare(b));
 
-  const lower = trimmed.toLowerCase();
-  const added = new Set<string>();
-
-  for (const [term, synonyms] of Object.entries(dictionary)) {
-    const pattern = new RegExp(`(?:^|\\s)${escapeRegExp(term)}(?:$|\\s|[.,;:!?])`, 'i');
-    if (!pattern.test(lower)) continue;
-    for (const synonym of synonyms) {
-      if (!lower.includes(synonym.toLowerCase())) {
-        added.add(synonym);
-      }
-    }
-  }
-
-  if (added.size === 0) {
-    return { expanded: trimmed, addedTerms: [] };
-  }
-
-  const addedTerms = [...added].sort((a, b) => a.localeCompare(b));
+  // Keep expanded as original text for backward-compatible callers.
+  // Lexical retrieval should use expandSynonymBranches / buildLexicalBranches.
   return {
-    expanded: `${trimmed} ${addedTerms.join(' ')}`,
+    expanded: text.trim(),
     addedTerms,
   };
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * Build lexical branches including synonym alternatives as independent OR lists.
+ */
+export function expandSynonymBranches(
+  text: string,
+  dictionary: Record<string, string[]> = {},
+): LexicalBranch[] {
+  return buildLexicalBranches(text, dictionary);
 }
