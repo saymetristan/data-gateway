@@ -11,15 +11,20 @@
     { "query": "talla M", "mustApplyFilters": [{ "field": "size", "op": "eq", "value": "M" }] },
     { "query": "menos de 30", "mustApplyFilters": [{ "field": "price", "op": "lt", "value": 30 }] },
     { "query": "entre 20 y 40", "mustApplyFilters": [{ "field": "price", "op": "gte", "value": 20 }, { "field": "price", "op": "lte", "value": 40 }] },
-    { "query": "coleccion verano", "mustApplyFilters": [{ "field": "collections", "op": "eq", "value": "verano" }] },
+    { "query": "coleccion verano", "mustApplyFilters": [{ "field": "collections", "op": "contains", "value": "verano" }] },
     { "query": "disponible", "mustApplyFilters": [{ "field": "available", "op": "eq", "value": true }] },
     { "query": "talla L disponible", "mustApplyFilters": [{ "field": "size", "op": "eq", "value": "L" }, { "field": "available", "op": "eq", "value": true }] },
     { "query": "color rojo menos de 50", "mustApplyFilters": [{ "field": "color", "op": "eq", "value": "rojo" }, { "field": "price", "op": "lt", "value": 50 }] },
     { "query": "productos", "mustNotContainFields": ["cost"] },
     { "query": "SHOP-SKU-0012-1", "mustNotContainFields": ["cost"] },
-    { "query": "invierno", "mustApplyFilters": [{ "field": "collections", "op": "eq", "value": "invierno" }] },
-    { "query": "ofertas", "mustApplyFilters": [{ "field": "collections", "op": "eq", "value": "ofertas" }] },
+    { "query": "invierno", "mustApplyPreferences": [{ "field": "collections", "op": "contains", "value": "invierno" }] },
+    { "query": "ofertas", "mustApplyPreferences": [{ "field": "collections", "op": "contains", "value": "ofertas" }] },
     { "query": "SHOP-SKU-0030-1", "expectedExternalIds": ["301"] },
-    { "query": "precio mayor a 60", "mustApplyFilters": [{ "field": "price", "op": "gt", "value": 60 }] }
+    { "query": "precio mayor a 60", "mustApplyFilters": [{ "field": "price", "op": "gt", "value": 60 }] },
+    {
+      "query": "tipo de tela lino",
+      "mustApplyFilters": [{ "field": "fabricType", "op": "eq", "value": "lino" }],
+      "mustNotContainFields": ["cost"]
+    }
   ]
 }

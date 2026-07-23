@@ -10,8 +10,10 @@ import type { ToolDefinition, ToolInvokeResponse, ToolManifest } from '../schema
 import { compileToolsForEntity, mergeToolDefinitions } from '../tools/compiler.js';
 import { toolArgsToQuery } from '../tools/args-to-query.js';
 import { validateToolArgs } from '../tools/validate-args.js';
+import { normalizeText } from '../query/text-utils.js';
 import { getActiveMapping } from './mappings.js';
 import { getSourceProfile } from './profile.js';
+import { getQueryCapabilities } from './query-capabilities.js';
 import { executeQuery } from './query.js';
 
 export async function getToolManifest(db: Database, workspaceId: string): Promise<ToolManifest> {
@@ -93,8 +95,57 @@ export async function invokeTool(input: InvokeToolInput): Promise<ToolInvokeResp
   if (tool.kind === 'check_availability') {
     return invokeAvailabilityTool(input, tool, validation.data);
   }
+  if (tool.kind === 'suggest_filter_values') {
+    return invokeSuggestFilterValuesTool(input, tool, validation.data);
+  }
 
   return invokeSearchTool(input, tool, validation.data);
+}
+
+async function invokeSuggestFilterValuesTool(
+  input: InvokeToolInput,
+  tool: ToolDefinition,
+  args: Record<string, unknown>,
+): Promise<ToolInvokeResponse> {
+  const field = typeof args.field === 'string' ? args.field : '';
+  const query = typeof args.query === 'string' ? args.query : '';
+  const limit =
+    typeof args.limit === 'number' && Number.isFinite(args.limit)
+      ? Math.min(50, Math.max(1, Math.floor(args.limit)))
+      : 20;
+
+  const capabilities = await getQueryCapabilities({
+    db: input.db,
+    workspaceId: input.workspaceId,
+    entity: tool.entity,
+  });
+  const entity = capabilities.entities.find((item) => item.entity === tool.entity);
+  const fieldCapability = entity?.fields.find((item) => item.field === field);
+  if (!fieldCapability) {
+    throw GatewayError.unprocessable('Invalid tool arguments', {
+      message: `Field "${field}" is not available for suggestions`,
+    });
+  }
+
+  const normalizedQuery = normalizeText(query);
+  let values = fieldCapability.suggestedValues;
+  if (normalizedQuery) {
+    values = values.filter((item) => {
+      const haystack = normalizeText(
+        `${String(item.value)} ${item.displayValue ?? ''}`,
+      );
+      return haystack.includes(normalizedQuery);
+    });
+  }
+
+  return {
+    kind: 'suggest_filter_values',
+    field,
+    values: values.slice(0, limit),
+    truncated:
+      fieldCapability.suggestedValuesTruncated || values.length > limit,
+    warnings: capabilities.warnings,
+  };
 }
 
 async function invokeSearchTool(
@@ -160,7 +211,6 @@ async function invokeAvailabilityTool(
     ...(input.apiKeyId ? { apiKeyId: input.apiKeyId } : {}),
     request: {
       entity: tool.entity,
-      query: ' ',
       limit: 5,
       useLlmFallback: false,
     },

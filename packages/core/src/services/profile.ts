@@ -159,6 +159,19 @@ function profileColumn(name: string, rows: Record<string, unknown>[]): ProfileCo
     if (Object.keys(jsonShape).length > 0) {
       column.jsonShape = jsonShape;
     }
+    const atomic = profileAtomicValues(nonNull);
+    if (atomic.values.length > 0) {
+      column.atomicValues = atomic.values;
+      column.atomicValuesTruncated = atomic.truncated;
+      // Prefer atomic members for enum-like multi-value JSON columns.
+      column.suggestedValues = atomic.values.map((item) => ({
+        value: item.value,
+        count: item.count,
+      }));
+      column.topValues = column.suggestedValues.slice(0, 20);
+      column.cardinality = atomic.uniqueCount;
+      column.enumCandidate = atomic.uniqueCount > 0 && atomic.uniqueCount <= MAX_SUGGESTED_VALUES;
+    }
   }
 
   if (inferredType === 'number' && numericValues.length > 0) {
@@ -198,6 +211,61 @@ function inferType(values: unknown[]): ProfileColumn['inferredType'] {
   }
   if (types.has('string')) return 'string';
   return 'unknown';
+}
+
+function profileAtomicValues(values: unknown[]): {
+  values: NonNullable<ProfileColumn['atomicValues']>;
+  truncated: boolean;
+  uniqueCount: number;
+} {
+  const counts = new Map<string, { value: string | number | boolean; displayValue?: string; count: number }>();
+
+  for (const value of values) {
+    for (const atom of expandAtomicMembers(value)) {
+      const key = canonicalValue(atom.value);
+      const existing = counts.get(key);
+      if (existing) {
+        existing.count += 1;
+        continue;
+      }
+      counts.set(key, {
+        value: atom.value,
+        ...(atom.displayValue ? { displayValue: atom.displayValue } : {}),
+        count: 1,
+      });
+    }
+  }
+
+  const sorted = [...counts.values()].sort((a, b) => b.count - a.count || String(a.value).localeCompare(String(b.value)));
+  return {
+    values: sorted.slice(0, MAX_SUGGESTED_VALUES),
+    truncated: sorted.length > MAX_SUGGESTED_VALUES,
+    uniqueCount: sorted.length,
+  };
+}
+
+function expandAtomicMembers(
+  value: unknown,
+): Array<{ value: string | number | boolean; displayValue?: string }> {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => expandAtomicMembers(item));
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (trimmed.includes(',')) {
+      return trimmed
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => ({ value: part }));
+    }
+    return [{ value: trimmed }];
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return [{ value }];
+  }
+  return [];
 }
 
 function inferJsonShape(values: unknown[]): NonNullable<ProfileColumn['jsonShape']> {

@@ -72,6 +72,130 @@ components:
           type: array
           items:
             type: string
+    QueryCapabilityValue:
+      type: object
+      required: [value, count]
+      properties:
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+        displayValue:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    QueryFieldCapability:
+      type: object
+      required:
+        [
+          field,
+          label,
+          filterLabel,
+          type,
+          aliases,
+          cardinality,
+          operators,
+          filterable,
+          preferable,
+          inferredBehavior,
+          match,
+          suggestedValues,
+          suggestedValuesTruncated,
+        ]
+      properties:
+        field:
+          type: string
+        label:
+          type: string
+        filterLabel:
+          type: string
+        type:
+          type: string
+          enum: [string, number, boolean, date, json]
+        aliases:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        cardinality:
+          type: string
+          enum: [one, many]
+        operators:
+          type: array
+          items:
+            type: string
+            enum: [eq, neq, gt, gte, lt, lte, in, contains, containsAny, containsAll]
+        filterable:
+          type: boolean
+        preferable:
+          type: boolean
+        inferredBehavior:
+          type: string
+          enum: [filter, prefer, search]
+        match:
+          type: string
+          enum: [eq, contains, containsAny, containsAll]
+        boost:
+          type: number
+          minimum: 0
+          maximum: 1
+        min:
+          oneOf:
+            - type: string
+            - type: number
+        max:
+          oneOf:
+            - type: string
+            - type: number
+        suggestedValues:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryCapabilityValue'
+        suggestedValuesTruncated:
+          type: boolean
+    QueryEntityCapability:
+      type: object
+      required: [entity, sourceIds, mappingVersion, fields]
+      properties:
+        entity:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        sourceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        mappingVersion:
+          type: integer
+          minimum: 1
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryFieldCapability'
+    QueryCapabilitiesResponse:
+      type: object
+      required: [workspaceId, generatedAt, entities, warnings]
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        generatedAt:
+          type: string
+          format: date-time
+        entities:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryEntityCapability'
+        warnings:
+          type: array
+          items:
+            type: string
     RetrievalPolicyDocument:
       type: object
       required: [entities]
@@ -82,7 +206,7 @@ components:
           maxItems: 20
           items:
             type: object
-            required: [entity, synonyms]
+            required: [entity]
             properties:
               entity:
                 type: string
@@ -102,10 +226,57 @@ components:
                     example:
                       aida: [cuadrille aida, cuadrille]
                       punto de cruz: [aida, etamina]
+              fields:
+                type: array
+                maxItems: 50
+                default: []
+                items:
+                  type: object
+                  required: [field]
+                  properties:
+                    field:
+                      type: string
+                    aliases:
+                      type: array
+                      maxItems: 20
+                      default: []
+                      items:
+                        type: string
+                    valueAliases:
+                      type: object
+                      description: Reservado para vocabulario de valores; no usar como override operativo hasta que capabilities lo publique.
+                      additionalProperties:
+                        type: array
+                        minItems: 1
+                        maxItems: 20
+                        items:
+                          type: string
+                    implicitBehavior:
+                      type: string
+                      enum: [filter, prefer, search]
+                    match:
+                      type: string
+                      description: Reservado en policies; define el operador operativo en el mapping activo.
+                      enum: [eq, contains, containsAny, containsAll]
+                    boost:
+                      type: number
+                      minimum: 0
+                      maximum: 1
+                  additionalProperties: false
+              rrf:
+                type: object
+                required: [lexicalWeight, vectorWeight]
+                properties:
+                  lexicalWeight:
+                    type: number
+                    exclusiveMinimum: 0
+                  vectorWeight:
+                    type: number
+                    exclusiveMinimum: 0
+                additionalProperties: false
     RetrievalPolicy:
       type: object
-      required:
-        [id, workspaceId, sourceId, version, status, document, createdAt, updatedAt]
+      required: [id, workspaceId, sourceId, version, status, document, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -124,7 +295,7 @@ components:
         document:
           $ref: '#/components/schemas/RetrievalPolicyDocument'
         activatedAt:
-          type: [string, "null"]
+          type: [string, 'null']
           format: date-time
         createdAt:
           type: string
@@ -141,7 +312,7 @@ paths:
       description: Devuelve el manifiesto de herramientas para las fuentes agent_ready. Requiere el scope `tools:read`.
       operationId: listTools
       responses:
-        "200":
+        '200':
           description: OK
 
           content:
@@ -174,12 +345,42 @@ paths:
                 args:
                   type: object
       responses:
-        "200":
+        '200':
           description: OK
+  /query/capabilities:
+    get:
+      summary: Descubrir capacidades de consulta
+      description: Lista campos seguros, operadores y valores sugeridos para construir filtros. No expone campos sensibles ni ocultos. Requiere `query:execute`.
+      operationId: getQueryCapabilities
+      parameters:
+        - name: sourceId
+          in: query
+          required: false
+          description: Limita las capacidades a una fuente del workspace.
+          schema:
+            type: string
+            format: uuid
+        - name: entity
+          in: query
+          required: false
+          description: Limita las capacidades a una entidad pública del mapping.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Capacidades filtrables y preferibles del workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryCapabilitiesResponse'
+        '400':
+          description: Parámetros inválidos.
+        '401':
+          description: API key inválida o sin scope `query:execute`.
   /query:
     post:
-      summary: Ejecutar Query Híbrido
-      description: Ejecuta una búsqueda semántica directamente a la base vectorial saltándose la capa MCP. Requiere el scope `query:execute`.
+      summary: Ejecutar consulta
+      description: Ejecuta texto libre, filtros, preferencias o una consulta híbrida directamente contra el motor determinístico. Debe incluir al menos uno de `query`, `filters` o `preferences`. Requiere `query:execute`.
       operationId: executeQuery
       requestBody:
         required: true
@@ -187,9 +388,14 @@ paths:
           application/json:
             schema:
               type: object
+              anyOf:
+                - required: [query]
+                - required: [filters]
+                - required: [preferences]
               properties:
                 query:
                   type: string
+                  description: Texto libre opcional cuando se envían filtros o preferencias.
                 limit:
                   type: integer
                   default: 10
@@ -199,11 +405,11 @@ paths:
                   oneOf:
                     - type: object
                       additionalProperties: true
-                      description: "Filtros legacy { campo: valor }"
+                      description: 'Filtros legacy { campo: valor }'
                     - type: array
                       items:
                         $ref: '#/components/schemas/NormalizedFilter'
-                  description: Restricciones duras. Soporta eq/contains/containsAny/containsAll.
+                  description: Restricciones duras validadas contra capabilities. Para integraciones nuevas se recomienda el array tipado.
                 preferences:
                   type: array
                   description: Boosts blandos. Priorizan sin excluir.
@@ -216,12 +422,18 @@ paths:
                   type: boolean
                   default: false
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/QueryResponse'
+        '400':
+          description: Payload inválido o sin criterios de búsqueda.
+        '401':
+          description: API key inválida o sin scope `query:execute`.
+        '422':
+          description: Campo, operador o valor incompatible con el mapping activo.
   /sources:
     post:
       summary: Crear Fuente (Source)
@@ -242,7 +454,7 @@ paths:
                 config:
                   type: object
       responses:
-        "200":
+        '200':
           description: OK
   /sources/{id}/retrieval-policies:
     get:
@@ -257,7 +469,7 @@ paths:
             type: string
             format: uuid
       responses:
-        "200":
+        '200':
           description: Versiones de la política
           content:
             application/json:
@@ -291,20 +503,20 @@ paths:
                 document:
                   $ref: '#/components/schemas/RetrievalPolicyDocument'
       responses:
-        "201":
+        '201':
           description: Draft creado
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RetrievalPolicy'
-        "409":
+        '409':
           description: Conflicto de versión activa
-        "400":
+        '400':
           description: Documento o entidad inválida
   /sources/{id}/retrieval-policies/active:
     get:
       summary: Obtener política de retrieval activa
-      description: "Devuelve `{ policy: null }` si el source todavía usa los sinónimos legacy del mapping. Requiere `retrieval:read`."
+      description: 'Devuelve `{ policy: null }` si el source todavía usa los sinónimos legacy del mapping. Requiere `retrieval:read`.'
       operationId: getActiveRetrievalPolicy
       parameters:
         - name: id
@@ -314,7 +526,7 @@ paths:
             type: string
             format: uuid
       responses:
-        "200":
+        '200':
           description: Política activa o null
   /sources/{id}/retrieval-policies/{version}/eval:
     post:
@@ -335,7 +547,7 @@ paths:
             type: integer
             minimum: 1
       responses:
-        "202":
+        '202':
           description: Eval encolado
           content:
             application/json:
@@ -346,13 +558,13 @@ paths:
                     type: string
                     format: uuid
                   jobId:
-                    type: [string, "null"]
+                    type: [string, 'null']
                   retrievalPolicyVersion:
                     type: integer
                   status:
                     type: string
                     enum: [queued]
-        "409":
+        '409':
           description: El source no tiene eval set específico o casos
   /sources/{id}/retrieval-policies/{version}/activate:
     post:
@@ -383,13 +595,13 @@ paths:
                   type: integer
                   minimum: 0
       responses:
-        "200":
+        '200':
           description: Política activa
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RetrievalPolicy'
-        "409":
+        '409':
           description: Eval faltante/fallido o conflicto de versión
   /sources/{id}/mapping:
     post:
@@ -411,7 +623,7 @@ paths:
                 document:
                   type: object
       responses:
-        "200":
+        '200':
           description: OK
   /sources/{id}/index:
     post:
@@ -425,7 +637,7 @@ paths:
           schema:
             type: string
       responses:
-        "200":
+        '200':
           description: OK
   /sources/{id}/activate:
     post:
@@ -439,7 +651,7 @@ paths:
           schema:
             type: string
       responses:
-        "200":
+        '200':
           description: OK
   /evals/sets:
     get:
@@ -447,7 +659,7 @@ paths:
       description: Devuelve los sets de evaluación del workspace. Requiere el scope `evals:read`.
       operationId: listEvalSets
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
@@ -481,7 +693,7 @@ paths:
                   type: string
                   format: uuid
       responses:
-        "201":
+        '201':
           description: Created
   /evals/sets/{id}:
     get:
@@ -496,7 +708,7 @@ paths:
             type: string
             format: uuid
       responses:
-        "200":
+        '200':
           description: OK
   /evals/sets/{id}/cases:
     post:
@@ -559,7 +771,7 @@ paths:
                 - required: [mustApplyPreferences]
                 - required: [mustNotContainFields]
       responses:
-        "201":
+        '201':
           description: Created
   /evals/sets/{id}/cases/{caseId}:
     delete:
@@ -580,9 +792,9 @@ paths:
             type: string
             format: uuid
       responses:
-        "204":
+        '204':
           description: Deleted
-        "404":
+        '404':
           description: Eval set or eval case not found
   /evals/run:
     post:
@@ -602,7 +814,7 @@ paths:
                   type: string
                   format: uuid
       responses:
-        "202":
+        '202':
           description: Queued
   /evals/runs/{id}:
     get:
@@ -617,5 +829,5 @@ paths:
             type: string
             format: uuid
       responses:
-        "200":
+        '200':
           description: OK

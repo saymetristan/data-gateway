@@ -1,0 +1,318 @@
+---
+title: 'Configurar Búsquedas y Filtros'
+description: 'Guía para exponer filtros seguros, consultas libres y preferencias adaptadas a cada negocio.'
+---
+
+# Configurar Búsquedas y Filtros
+
+El Data Gateway conserva una búsqueda universal, pero permite que cada negocio defina su propio vocabulario, campos y comportamiento. Un cliente puede consultar de tres formas:
+
+- **Texto libre:** `"sillón azul para exterior"`.
+- **Filtros estructurados:** colección, precio, disponibilidad u otro campo permitido.
+- **Consulta híbrida:** texto libre + filtros duros + preferencias de ranking.
+
+<Info>
+  No envíes nombres de columnas de la base de origen. Usa siempre los nombres públicos del mapping,
+  disponibles en `GET /query/capabilities`.
+</Info>
+
+## Antes de empezar
+
+Necesitas:
+
+- una fuente con mapping activo;
+- una API key con scope `query:execute`;
+- el `sourceId` si quieres limitar la consulta a una sola fuente.
+
+## 1. Descubre qué admite la fuente
+
+Consulta las capacidades antes de construir formularios, filtros o llamadas desde un agente:
+
+```bash
+curl "https://data.whaapy.com/query/capabilities?sourceId={source_id}&entity=variant" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+```
+
+`sourceId` y `entity` son opcionales. Úsalos para evitar mezclar entidades con nombres de campo distintos.
+
+Respuesta abreviada:
+
+```json
+{
+  "generatedAt": "2026-07-23T18:00:00.000Z",
+  "entities": [
+    {
+      "entity": "variant",
+      "mappingVersion": 4,
+      "sourceIds": ["8b535fe3-79c5-4b67-9328-1913f9f75491"],
+      "fields": [
+        {
+          "field": "collections",
+          "label": "Colecciones",
+          "type": "json",
+          "cardinality": "many",
+          "operators": ["eq", "neq", "in", "contains", "containsAny", "containsAll"],
+          "filterable": true,
+          "preferable": true,
+          "inferredBehavior": "prefer",
+          "match": "contains",
+          "suggestedValues": [
+            { "value": "Verano", "count": 142 },
+            { "value": "Exterior", "count": 83 }
+          ],
+          "suggestedValuesTruncated": false
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
+```
+
+Usa la respuesta así:
+
+- `field`: nombre que debes enviar en `filters` y `preferences`.
+- `operators`: operadores válidos para ese campo.
+- `suggestedValues`: valores canónicos observados en los datos; son sugerencias, no una lista exhaustiva.
+- `cardinality: "many"`: el registro puede contener varios valores.
+- `inferredBehavior`: tratamiento del campo cuando aparece en texto libre.
+- `suggestedValuesTruncated: true`: existen más valores de los publicados.
+
+<Warning>
+  Las capacidades nunca incluyen campos `sensitive` ni `visible: false`. Tampoco reemplazan la
+  validación del servidor: una consulta inválida responde `422`.
+</Warning>
+
+## 2. Elige la intención de la consulta
+
+### Texto libre
+
+Usa `query` para significado, atributos descriptivos o frases del usuario:
+
+```bash
+curl -X POST "https://data.whaapy.com/query" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceId": "{source_id}",
+    "entity": "variant",
+    "query": "tela resistente para exterior",
+    "limit": 10
+  }'
+```
+
+### Solo filtros
+
+`query` es opcional si envías al menos un filtro o una preferencia:
+
+```bash
+curl -X POST "https://data.whaapy.com/query" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceId": "{source_id}",
+    "entity": "variant",
+    "filters": [
+      { "field": "collections", "op": "contains", "value": "Verano" },
+      { "field": "price", "op": "lte", "value": 500 },
+      { "field": "available", "op": "eq", "value": true }
+    ],
+    "limit": 20
+  }'
+```
+
+La respuesta tendrá `query_type: "filter_only"`.
+
+### Texto + filtro + preferencia
+
+En este ejemplo, un filtro duro restringe resultados y una preferencia solo modifica el orden:
+
+```bash
+curl -X POST "https://data.whaapy.com/query" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceId": "{source_id}",
+    "entity": "variant",
+    "query": "tela antimancha",
+    "filters": [
+      { "field": "available", "op": "eq", "value": true }
+    ],
+    "preferences": [
+      {
+        "field": "collections",
+        "op": "contains",
+        "value": "Verano",
+        "boost": 0.3
+      }
+    ]
+  }'
+```
+
+En este ejemplo:
+
+- los registros no disponibles se excluyen;
+- los de la colección `Verano` suben en el ranking;
+- otros registros disponibles todavía pueden aparecer.
+
+## 3. Usa el operador correcto
+
+- `eq` / `neq`: igualdad o desigualdad exacta.
+- `gt`, `gte`, `lt`, `lte`: rangos para números y fechas.
+- `in`: el campo debe coincidir con uno de los valores enviados.
+- `contains`: un campo de texto o multivalor contiene un valor.
+- `containsAny`: un campo multivalor contiene al menos un elemento del array.
+- `containsAll`: un campo multivalor contiene todos los elementos del array.
+
+Ejemplo con varias colecciones:
+
+```json
+{
+  "filters": [
+    {
+      "field": "collections",
+      "op": "containsAny",
+      "value": ["Verano", "Exterior"]
+    }
+  ]
+}
+```
+
+<Tip>
+  Para un campo con `cardinality: "many"`, usa normalmente `contains`, `containsAny` o
+  `containsAll`. Consulta `operators` en capabilities en lugar de inferirlos por el tipo.
+</Tip>
+
+## 4. Configura el mapping
+
+El mapping define el contrato estable: qué datos existen, cuáles puede usar un cliente y cuándo se requiere reindexación.
+
+```json
+{
+  "name": "collections",
+  "sourceColumn": "collections",
+  "type": "json",
+  "label": "Colecciones",
+  "filterLabel": "Filtrar por colección",
+  "aliases": ["colección", "colecciones", "collection"],
+  "searchable": true,
+  "filterable": true,
+  "visible": true,
+  "sensitive": false,
+  "retrieval": {
+    "cardinality": "many",
+    "match": "contains",
+    "inferredBehavior": "prefer",
+    "boost": 0.3,
+    "searchWeight": "B"
+  }
+}
+```
+
+Las decisiones principales son:
+
+- `filterable: true`: permite usar el campo en filtros y preferencias.
+- `aliases`: ayuda a reconocer el nombre del campo en lenguaje natural.
+- `cardinality`: usa `many` para colecciones, tags u otros arrays.
+- `match`: operador predeterminado al inferir el campo.
+- `inferredBehavior: "filter"`: una coincidencia implícita excluye registros.
+- `inferredBehavior: "prefer"`: prioriza coincidencias sin excluir.
+- `inferredBehavior: "search"`: mantiene el texto dentro de la búsqueda libre.
+- `boost`: fuerza de una preferencia, entre `0` y `1`.
+- `searchWeight`: peso léxico `A`–`D`, donde `A` es más fuerte.
+
+Consulta la [Guía de Mapeo](/onboarding/mapping-guide) para aplicar e indexar el documento.
+
+## 5. Ajusta vocabulario sin reindexar
+
+Una política de retrieval versionada puede agregar aliases, cambiar el comportamiento implícito y ajustar pesos de ranking sin modificar records ni embeddings.
+
+```json
+{
+  "document": {
+    "entities": [
+      {
+        "entity": "variant",
+        "synonyms": {
+          "entries": {
+            "vinipiel": ["piel sintética", "ecocuero"]
+          }
+        },
+        "fields": [
+          {
+            "field": "collections",
+            "aliases": ["línea", "temporada"],
+            "implicitBehavior": "prefer",
+            "boost": 0.35
+          }
+        ],
+        "rrf": {
+          "lexicalWeight": 1,
+          "vectorWeight": 1.1
+        }
+      }
+    ]
+  },
+  "expectedActiveVersion": 3
+}
+```
+
+Envía el documento a `POST /sources/{id}/retrieval-policies`, ejecuta su eval y actívalo. Revisa el flujo completo en [Políticas de Retrieval](/concepts/retrieval-policies).
+
+<Note>
+  Usa el mapping para cambiar campos, seguridad, cardinalidad o `searchWeight`. Usa una política
+  para ajustes de query-time que deban entrar en vigor sin reindexar.
+</Note>
+
+## 6. Maneja errores `422`
+
+Los filtros estructurados son estrictos. El Gateway rechaza:
+
+- campos inexistentes, no filtrables, sensibles u ocultos;
+- operadores incompatibles con el tipo o cardinalidad;
+- arrays vacíos o valores con tipo incorrecto;
+- intentos de reemplazar un `defaultFilter`;
+- requests sin `query`, filtros ni preferencias.
+
+Respuesta de ejemplo:
+
+```json
+{
+  "error": {
+    "code": "unprocessable_entity",
+    "message": "Invalid structured filters",
+    "details": {
+      "issues": [
+        {
+          "path": "filters[0].op",
+          "message": "Operator \"gt\" is only valid for number/date fields (got string)"
+        }
+      ]
+    }
+  }
+}
+```
+
+Muestra `details.issues[].message` al equipo integrador y vuelve a consultar capabilities si cambió `mappingVersion`.
+
+## 7. Checklist antes de publicar
+
+<Steps>
+  <Step title="Confirma el contrato">
+    Consulta capabilities y verifica campos, operadores y valores de ejemplo.
+  </Step>
+  <Step title="Prueba cada intención">
+    Ejecuta un caso de texto libre, uno filter-only y uno híbrido.
+  </Step>
+  <Step title="Prueba campos multivalor">
+    Valida `contains`, `containsAny` y `containsAll` con registros reales.
+  </Step>
+  <Step title="Valida seguridad">
+    Confirma que campos sensibles u ocultos no aparecen en capabilities ni resultados.
+  </Step>
+  <Step title="Corre evals">
+    Cubre filtros, preferencias, ranking y anti-leak antes de activar cambios.
+  </Step>
+</Steps>
+
+Siguiente: [Activación y Evals](/onboarding/activation-checklist).

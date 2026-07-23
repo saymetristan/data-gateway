@@ -25,18 +25,59 @@ export async function createRetrievalPolicyDraft(
   await getSourceForWorkspace(db, workspaceId, sourceId);
   const mapping = await getActiveMapping(db, sourceId);
   const mappingDocument = mapping.document as {
-    entities?: Array<{ entity?: string }>;
+    entities?: Array<{
+      entity?: string;
+      fields?: Array<{
+        name?: string;
+        sensitive?: boolean;
+        filterable?: boolean;
+        visible?: boolean;
+      }>;
+    }>;
   };
-  const allowedEntities = new Set(
+  const entitiesByName = new Map(
     (mappingDocument.entities ?? [])
-      .map((entity) => entity.entity)
-      .filter((entity): entity is string => typeof entity === 'string'),
+      .filter((entity): entity is { entity: string; fields?: Array<{ name?: string; sensitive?: boolean; filterable?: boolean; visible?: boolean }> } =>
+        typeof entity.entity === 'string',
+      )
+      .map((entity) => [entity.entity, entity]),
   );
   for (const entity of input.document.entities) {
-    if (!allowedEntities.has(entity.entity)) {
+    const mappingEntity = entitiesByName.get(entity.entity);
+    if (!mappingEntity) {
       throw GatewayError.validation(
         `Retrieval policy entity "${entity.entity}" is not present in the active mapping`,
       );
+    }
+    const fieldsByName = new Map(
+      (mappingEntity.fields ?? [])
+        .filter((field): field is { name: string; sensitive?: boolean; filterable?: boolean; visible?: boolean } =>
+          typeof field.name === 'string',
+        )
+        .map((field) => [field.name, field]),
+    );
+    for (const fieldPolicy of entity.fields) {
+      const mappingField = fieldsByName.get(fieldPolicy.field);
+      if (!mappingField) {
+        throw GatewayError.validation(
+          `Retrieval policy field "${fieldPolicy.field}" is not present in mapping entity "${entity.entity}"`,
+        );
+      }
+      if (mappingField.sensitive) {
+        throw GatewayError.validation(
+          `Retrieval policy field "${fieldPolicy.field}" is sensitive and cannot be configured`,
+        );
+      }
+      if (mappingField.visible === false) {
+        throw GatewayError.validation(
+          `Retrieval policy field "${fieldPolicy.field}" is not visible and cannot be configured`,
+        );
+      }
+      if (mappingField.filterable === false) {
+        throw GatewayError.validation(
+          `Retrieval policy field "${fieldPolicy.field}" is not filterable`,
+        );
+      }
     }
   }
 
@@ -347,11 +388,47 @@ export function resolveEntitySynonyms(
   const policyEntity = policy?.document.entities.find(
     (item) => item.entity === entity,
   );
-  if (!policyEntity || !policy) return legacy;
+  if (!policyEntity?.synonyms || !policy) return legacy;
   return {
     version: `retrieval-policy-v${String(policy.version)}`,
     entries: policyEntity.synonyms.entries,
   };
+}
+
+export type ResolvedFieldPolicy = {
+  aliases: string[];
+  valueAliases: Record<string, string[]>;
+  implicitBehavior?: 'filter' | 'prefer' | 'search';
+  match?: 'eq' | 'contains' | 'containsAny' | 'containsAll';
+  boost?: number;
+};
+
+/** Field policy overlays mapping retrieval defaults for query-time behavior. */
+export function resolveFieldPolicy(
+  policy: ActiveRetrievalPolicy | undefined,
+  entity: string,
+  field: string,
+): ResolvedFieldPolicy | undefined {
+  const policyEntity = policy?.document.entities.find((item) => item.entity === entity);
+  const fieldPolicy = policyEntity?.fields.find((item) => item.field === field);
+  if (!fieldPolicy) return undefined;
+  return {
+    aliases: fieldPolicy.aliases,
+    valueAliases: fieldPolicy.valueAliases ?? {},
+    ...(fieldPolicy.implicitBehavior ? { implicitBehavior: fieldPolicy.implicitBehavior } : {}),
+    ...(fieldPolicy.match ? { match: fieldPolicy.match } : {}),
+    ...(fieldPolicy.boost !== undefined ? { boost: fieldPolicy.boost } : {}),
+  };
+}
+
+export function resolveEntityRrf(
+  policy: ActiveRetrievalPolicy | undefined,
+  entity: string,
+  legacy?: { lexicalWeight: number; vectorWeight: number },
+): { lexicalWeight: number; vectorWeight: number } | undefined {
+  const policyEntity = policy?.document.entities.find((item) => item.entity === entity);
+  if (policyEntity?.rrf) return policyEntity.rrf;
+  return legacy;
 }
 
 function assertExpectedActiveVersion(

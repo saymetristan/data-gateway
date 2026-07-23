@@ -248,7 +248,7 @@ describe.runIf(hasFixture)('query integration', () => {
     });
   });
 
-  it('ignora filtros del request sobre campos no-filterable/sensitive', async () => {
+  it('rechaza con 422 filtros del request sobre campos no-filterable/sensitive', async () => {
     await withTestDatabase(async (db, testUrl) => {
       const [workspace] = await db
         .insert(workspaces)
@@ -258,34 +258,64 @@ describe.runIf(hasFixture)('query integration', () => {
 
       await bootstrapSource(db, testUrl, workspace.id);
 
-      const baseline = await executeQuery({
-        db,
-        workspaceId: workspace.id,
-        request: { query: 'SKU-00042', limit: 5 },
-        embeddingProvider: new MockEmbeddingProvider(1024),
+      await expect(
+        executeQuery({
+          db,
+          workspaceId: workspace.id,
+          request: {
+            query: 'SKU-00042',
+            filters: {
+              cost: 52.99,
+              description: 'Descripcion del producto 42 para catalogo ecommerce en español.',
+            },
+            limit: 5,
+          },
+          embeddingProvider: new MockEmbeddingProvider(1024),
+        }),
+      ).rejects.toMatchObject({
+        code: 'unprocessable_entity',
+        status: 422,
       });
-      const probed = await executeQuery({
+    });
+  });
+
+  it('acepta consultas filter-only sin texto libre', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Filter Only', slug: `fo-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      await bootstrapSource(db, testUrl, workspace.id);
+
+      const response = await executeQuery({
         db,
         workspaceId: workspace.id,
         request: {
-          query: 'SKU-00042',
-          filters: { cost: 52.99, description: 'Descripcion del producto 42 para catalogo ecommerce en español.' },
-          limit: 5,
+          filters: [
+            { field: 'color', op: 'eq', value: 'rojo' },
+            { field: 'price', op: 'lte', value: 100 },
+          ],
+          limit: 20,
         },
         embeddingProvider: new MockEmbeddingProvider(1024),
       });
 
-      expect(probed.results.map((result) => result.id)).toEqual(
-        baseline.results.map((result) => result.id),
+      expect(response.query_type).toBe('filter_only');
+      expect(response.results.length).toBeGreaterThan(0);
+      expect(response.applied_filters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'color', op: 'eq', value: 'rojo' }),
+          expect.objectContaining({ field: 'price', op: 'lte', value: 100 }),
+          // Mapping defaultFilters remain applied as guardrails.
+          expect.objectContaining({ field: 'available', op: 'eq', value: true }),
+        ]),
       );
-      expect(probed.applied_filters.some((filter) => filter.field === 'cost')).toBe(false);
-      expect(probed.applied_filters.some((filter) => filter.field === 'description')).toBe(false);
-      expect(
-        probed.warnings.some((warning) => warning.includes('non-filterable field "cost"')),
-      ).toBe(true);
-      expect(
-        probed.warnings.some((warning) => warning.includes('non-filterable field "description"')),
-      ).toBe(true);
+      for (const result of response.results) {
+        expect(result.data.color).toBe('rojo');
+        expect(Number(result.data.price)).toBeLessThanOrEqual(100);
+      }
     });
   });
 

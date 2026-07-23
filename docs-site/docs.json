@@ -41,6 +41,7 @@
           "onboarding/shopify",
           "onboarding/csv",
           "onboarding/mapping-guide",
+          "onboarding/configure-search",
           "onboarding/synonym-updates",
           "onboarding/activation-checklist"
         ]
@@ -59,7 +60,11 @@
       },
       {
         "group": "API Reference",
-        "pages": ["api-reference/authentication", "api-reference/scopes"]
+        "pages": [
+          "api-reference/authentication",
+          "api-reference/scopes",
+          "api-reference/query-and-filters"
+        ]
       }
     ]
   }

@@ -18,6 +18,7 @@ const policy: ActiveRetrievalPolicy = {
             aida: ['cuadrille aida'],
           },
         },
+        fields: [],
       },
     ],
   },

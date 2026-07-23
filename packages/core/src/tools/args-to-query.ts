@@ -89,10 +89,12 @@ export function toolArgsToQuery(
     }
   }
 
+  const trimmedQuery = query.trim();
   return {
     request: {
       entity: tool.entity,
-      query: query.trim() || ' ',
+      // Empty query is valid for tool invoke; structured args travel via presetFilters.
+      ...(trimmedQuery ? { query: trimmedQuery } : {}),
       limit,
       useLlmFallback: false,
       ...(preferences.length > 0 ? { preferences } : {}),

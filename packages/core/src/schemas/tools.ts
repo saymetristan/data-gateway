@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const toolKindSchema = z.enum(['search', 'check_availability']);
+export const toolKindSchema = z.enum(['search', 'check_availability', 'suggest_filter_values']);
 
 export const jsonSchemaObjectSchema = z.record(z.string(), z.unknown());
 
@@ -69,6 +69,19 @@ export const toolInvokeResponseSchema = z.union([
         data: z.record(z.string(), z.unknown()),
       }),
     ),
+    warnings: z.array(z.string()),
+  }),
+  z.object({
+    kind: z.literal('suggest_filter_values'),
+    field: z.string(),
+    values: z.array(
+      z.object({
+        value: z.union([z.string(), z.number(), z.boolean()]),
+        displayValue: z.string().optional(),
+        count: z.number().int().nonnegative(),
+      }),
+    ),
+    truncated: z.boolean(),
     warnings: z.array(z.string()),
   }),
 ]);

@@ -22,9 +22,13 @@ import type {
   QueryResponse,
   QueryType,
 } from '../schemas/query.js';
-import { normalizeRequestFilters } from '../schemas/query.js';
+import {
+  normalizeRequestFilters,
+  requestQueryText,
+} from '../schemas/query.js';
 import { computeConfidence } from '../query/confidence.js';
 import { extractFilters, resolveExtractedMatches } from '../query/extract-filters.js';
+import { validateStructuredFilters } from '../query/validate-filters.js';
 import {
   computeDistinctiveTermCoverage,
   extractDistinctiveTerms,
@@ -62,10 +66,13 @@ import { getSourceProfile } from './profile.js';
 import {
   getActiveRetrievalPoliciesForSources,
   getRetrievalPolicyById,
+  resolveEntityRrf,
   resolveEntitySynonyms,
+  resolveFieldPolicy,
   type ActiveRetrievalPolicy,
 } from './retrieval-policies.js';
 import { retrievalPolicyDocumentSchema } from '../schemas/retrieval-policy.js';
+import type { QueryPlan } from '../query/plan.js';
 
 const QUERYABLE_MATURITY = new Set(['indexed', 'validated', 'agent_ready']);
 
@@ -150,6 +157,7 @@ type PreparedQuery = {
   vectorWeight: number;
   embeddingsAvailableBySource: Map<string, boolean>;
   warnings: string[];
+  queryPlan: QueryPlan;
 };
 
 type EmbeddingResolution = {
@@ -273,7 +281,8 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
       metadata.synonymDictVersion = prepared.synonymDictVersion;
       metadata.synonymTermsAdded = synonymAlts;
     }
-    const distinctiveTerms = extractDistinctiveTerms(searchText || input.request.query, dictionary);
+    const rawQueryText = requestQueryText(input.request);
+    const distinctiveTerms = extractDistinctiveTerms(searchText || rawQueryText, dictionary);
 
     const hasFreeText = unresolvedText.trim().length > 0;
     const needsEmbedding =
@@ -282,7 +291,7 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
 
     // Free-text for a possible relaxation retry: original query (terms stripped by
     // over-eager implicit filters are restored for FTS).
-    const relaxedSearchText = input.request.query.trim();
+    const relaxedSearchText = rawQueryText.trim();
     const relaxedLexicalBranches = relaxedSearchText
       ? expandSynonymBranches(relaxedSearchText, dictionary)
       : [];
@@ -582,7 +591,7 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
       writeQueryLog(
         { ...input, db: tx },
         {
-          rawQuery: input.request.query,
+          rawQuery: requestQueryText(input.request),
           structuredQuery: { extracted: appliedFilters },
           queryType,
           appliedFilters,
@@ -959,7 +968,7 @@ async function finalizeResponse(args: {
   };
 
   await writeQueryLog(input, {
-    rawQuery: input.request.query,
+    rawQuery: requestQueryText(input.request),
     structuredQuery: {
       extracted: extractedFilters,
       preferences: extractedPreferences,
@@ -1071,27 +1080,70 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
 
   const allFields = collectAllFields(queryable, entityFilter);
   const fieldsByName = new Map(allFields.map((field) => [field.name, field]));
+  const queryText = requestQueryText(input.request);
+
+  // Overlay retrieval-policy field aliases before NL extraction.
+  for (const source of queryable) {
+    const policy = retrievalPolicies.get(source.id);
+    if (!policy) continue;
+    for (const entity of pickEntities(source.document, entityFilter)) {
+      for (const field of entity.fields) {
+        const fieldPolicy = resolveFieldPolicy(policy, entity.entity, field.name);
+        if (!fieldPolicy?.aliases.length) continue;
+        field.aliases = [...new Set([...(field.aliases ?? []), ...fieldPolicy.aliases])];
+        const mapped = fieldsByName.get(field.name);
+        if (mapped) {
+          mapped.aliases = [...new Set([...(mapped.aliases ?? []), ...fieldPolicy.aliases])];
+        }
+      }
+    }
+  }
 
   const extractedMatches = [];
   const extractWarnings: string[] = [];
-  for (const source of queryable) {
-    const entities = pickEntities(source.document, entityFilter);
-    for (const entity of entities) {
-      const extracted = extractFilters({
-        query: input.request.query,
-        entity,
-        profile: source.profile,
-      });
-      extractedMatches.push(...extracted.matches);
-      extractWarnings.push(...extracted.warnings);
+  if (queryText.trim().length > 0) {
+    for (const source of queryable) {
+      const entities = pickEntities(source.document, entityFilter);
+      for (const entity of entities) {
+        const extracted = extractFilters({
+          query: queryText,
+          entity,
+          profile: source.profile,
+        });
+        extractedMatches.push(...extracted.matches);
+        extractWarnings.push(...extracted.warnings);
+      }
     }
   }
 
   const resolved = resolveExtractedMatches({
-    query: input.request.query,
+    query: queryText,
     matches: extractedMatches,
     fieldsByName,
     extraWarnings: extractWarnings,
+    resolveBehavior: (fieldName, origin) => {
+      if (origin === 'explicit') return 'filter';
+      for (const source of queryable) {
+        const policy = retrievalPolicies.get(source.id);
+        for (const entity of pickEntities(source.document, entityFilter)) {
+          const fieldPolicy = resolveFieldPolicy(policy, entity.entity, fieldName);
+          if (fieldPolicy?.implicitBehavior) return fieldPolicy.implicitBehavior;
+        }
+      }
+      const field = fieldsByName.get(fieldName);
+      return field ? getFieldRetrieval(field).inferredBehavior : 'filter';
+    },
+    resolveBoost: (fieldName) => {
+      for (const source of queryable) {
+        const policy = retrievalPolicies.get(source.id);
+        for (const entity of pickEntities(source.document, entityFilter)) {
+          const fieldPolicy = resolveFieldPolicy(policy, entity.entity, fieldName);
+          if (fieldPolicy?.boost !== undefined) return fieldPolicy.boost;
+        }
+      }
+      const field = fieldsByName.get(fieldName);
+      return field ? getFieldRetrieval(field).boost : undefined;
+    },
   });
   warnings.push(...resolved.warnings);
 
@@ -1105,6 +1157,36 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
 
   const defaultFilters = collectDefaultFilters(queryable, entityFilter);
   const requestFilters = normalizeRequestFilters(input.request.filters);
+  const filterableFields = collectFilterableFields(queryable, entityFilter);
+  for (const filter of defaultFilters) {
+    filterableFields.add(filter.field);
+  }
+  for (const filter of input.presetFilters ?? []) {
+    filterableFields.add(filter.field);
+  }
+
+  const preferableFields = collectPreferableFields(queryable, entityFilter);
+
+  // Client-supplied structured clauses are strict (422). Inferred NL matches stay soft.
+  validateStructuredFilters({
+    filters: requestFilters,
+    preferences: input.request.preferences ?? [],
+    fieldsByName,
+    filterableFields,
+    preferableFields,
+    defaultFilters,
+    strictPreferences: true,
+  });
+  // Tool presets are validated for type/operator safety, but may restate defaultFilters
+  // (e.g. check_availability adding available=true when the mapping already defaults it).
+  if ((input.presetFilters?.length ?? 0) > 0) {
+    validateStructuredFilters({
+      filters: input.presetFilters ?? [],
+      fieldsByName,
+      filterableFields,
+    });
+  }
+
   const protectedFilters = [
     ...defaultFilters,
     ...(input.presetFilters ?? []),
@@ -1116,14 +1198,12 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     defaultFilters,
   );
 
-  const filterableFields = collectFilterableFields(queryable, entityFilter);
-  for (const filter of defaultFilters) {
-    filterableFields.add(filter.field);
-  }
-  for (const filter of input.presetFilters ?? []) {
-    filterableFields.add(filter.field);
-  }
   const safeFilters = mergedFilters.filter((filter) => {
+    // Request/preset already validated. Soft-ignore only applies to NL-inferred filters.
+    const isProtected = protectedFilters.some(
+      (item) => item.field === filter.field && item.op === filter.op,
+    );
+    if (isProtected) return true;
     if (isSensitiveField(fieldsByName.get(filter.field))) {
       warnings.push(`Filter on sensitive field "${filter.field}" ignored`);
       return false;
@@ -1134,7 +1214,6 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
   });
   const appliedFilters = shapeAppliedFilters(safeFilters, allFields);
 
-  const preferableFields = collectPreferableFields(queryable, entityFilter);
   const mappingSoftPreferences = collectSoftPreferences(queryable, entityFilter);
   const requestPreferences = [
     ...resolved.preferences,
@@ -1146,6 +1225,7 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     preferableFields,
     fieldsByName,
     warnings,
+    new Set((input.request.preferences ?? []).map((item) => item.field)),
   );
 
   const synonymConfig = collectSynonymDictionary(
@@ -1153,7 +1233,7 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     entityFilter,
     retrievalPolicies,
   );
-  const rrf = collectRrfWeights(queryable, entityFilter);
+  const rrf = collectRrfWeights(queryable, entityFilter, retrievalPolicies);
 
   const embeddingsAvailableBySource = await resolveEmbeddingsAvailability(
     db,
@@ -1189,6 +1269,17 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     vectorWeight: rrf.vectorWeight,
     embeddingsAvailableBySource,
     warnings,
+    queryPlan: {
+      hardFilters: safeFilters,
+      preferences: appliedPreferences,
+      remainingText: unresolvedText,
+      matchedSpans: extractedMatches.map((match) => ({
+        field: match.field,
+        origin: match.origin,
+        span: match.span,
+      })),
+      warnings: [...warnings],
+    } satisfies QueryPlan,
   };
 }
 
@@ -1346,10 +1437,15 @@ function collectSynonymDictionary(
 function collectRrfWeights(
   queryable: QueryableSource[],
   entity?: string,
+  policiesBySource: Map<string, ActiveRetrievalPolicy> = new Map(),
 ): { lexicalWeight: number; vectorWeight: number } {
   for (const source of queryable) {
     for (const entityDef of pickEntities(source.document, entity)) {
-      const rrf = entityDef.retrieval?.rrf;
+      const rrf = resolveEntityRrf(
+        policiesBySource.get(source.id),
+        entityDef.entity,
+        entityDef.retrieval?.rrf,
+      );
       if (rrf) {
         return {
           lexicalWeight: rrf.lexicalWeight,
@@ -1399,6 +1495,8 @@ function sanitizePreferences(
   preferableFields: Set<string>,
   fieldsByName: Map<string, MappingField>,
   warnings: string[],
+  /** Explicit client preferences were already validated; never soft-ignore them. */
+  strictFields: Set<string> = new Set(),
 ): QueryPreference[] {
   const sanitized: QueryPreference[] = [];
   const seen = new Set<string>();
@@ -1408,11 +1506,32 @@ function sanitizePreferences(
     seen.add(key);
 
     const field = fieldsByName.get(preference.field);
+    const isStrict = strictFields.has(preference.field);
     if (isSensitiveField(field)) {
+      if (isStrict) {
+        throw GatewayError.unprocessable('Invalid structured filters', {
+          issues: [
+            {
+              path: 'preferences',
+              message: `Field "${preference.field}" is sensitive and cannot be used in preferences`,
+            },
+          ],
+        });
+      }
       warnings.push(`Preference on sensitive field "${preference.field}" ignored`);
       continue;
     }
     if (!preferableFields.has(preference.field)) {
+      if (isStrict) {
+        throw GatewayError.unprocessable('Invalid structured filters', {
+          issues: [
+            {
+              path: 'preferences',
+              message: `Field "${preference.field}" is not preferable`,
+            },
+          ],
+        });
+      }
       warnings.push(`Preference on non-preferable field "${preference.field}" ignored`);
       continue;
     }

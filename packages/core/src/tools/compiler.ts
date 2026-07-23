@@ -35,6 +35,9 @@ export function compileToolsForEntity(input: CompileToolsInput): ToolDefinition[
   const availabilityTool = buildCheckAvailabilityTool(input);
   if (availabilityTool) tools.push(availabilityTool);
 
+  const suggestTool = buildSuggestFilterValuesTool(input);
+  if (suggestTool) tools.push(suggestTool);
+
   return tools;
 }
 
@@ -281,6 +284,56 @@ function buildSearchTool(input: CompileToolsInput): ToolDefinition | null {
   };
 }
 
+function buildSuggestFilterValuesTool(input: CompileToolsInput): ToolDefinition | null {
+  const targets = getFilterableTargets(input.entity).filter(
+    (target) => target.type === 'string' || target.type === 'json',
+  );
+  if (targets.length === 0) return null;
+
+  const entitySlug = slugifyToolName(input.entity.entity);
+  const fieldEnum = targets.map((target) => target.name);
+  return {
+    name: `suggest_filter_values_${entitySlug}`,
+    kind: 'suggest_filter_values',
+    description: [
+      `Sugiere valores canónicos para filtros de ${entityLabel(input.entity)}.`,
+      'When to use: cuando el cliente menciona una colección, categoría u otro valor y necesitas el nombre exacto antes de filtrar.',
+      `Never use for: búsquedas amplias; usa search_${entitySlug} cuando ya tengas el valor o quieras texto libre.`,
+      'Success criteria: ok=true y data.values con value/count; usa esos valores en search_* filtros.',
+    ].join('\n'),
+    entity: input.entity.entity,
+    sourceIds: [...input.sourceIds],
+    mappingVersion: input.mappingVersion,
+    inputSchema: {
+      $schema: JSON_SCHEMA_DRAFT,
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        field: {
+          type: 'string',
+          enum: fieldEnum,
+          description: 'Campo filtrable para el que se solicitan valores',
+        },
+        query: {
+          type: 'string',
+          description: 'Texto parcial opcional para filtrar sugerencias',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 50,
+          default: 20,
+          description: 'Cantidad máxima de valores sugeridos',
+        },
+      },
+      required: ['field'],
+    },
+    outputHints: {
+      returns: 'filter_value_suggestions',
+    },
+  };
+}
+
 function buildCheckAvailabilityTool(input: CompileToolsInput): ToolDefinition | null {
   const booleanTargets = getFilterableTargets(input.entity).filter((target) => target.type === 'boolean');
   if (booleanTargets.length === 0) return null;
@@ -348,6 +401,15 @@ function buildAvailabilityDescription(input: CompileToolsInput, identifier: Mapp
 
 function buildEnumValues(column: ProfileColumn | undefined): string[] | null {
   if (!column) return null;
+  if (column.atomicValues && column.atomicValues.length > 0) {
+    if (column.cardinality > ENUM_MAX_CARDINALITY && !column.atomicValuesTruncated) {
+      // High-cardinality multi-value fields: still expose a truncated hint list.
+    }
+    const atomic = column.atomicValues
+      .slice(0, ENUM_MAX_TOP_VALUES)
+      .map((item) => String(item.value));
+    return atomic.length > 0 ? [...new Set(atomic)] : null;
+  }
   if (column.inferredType === 'json') return null;
   if (column.cardinality > ENUM_MAX_CARDINALITY) return null;
   const values = (column.suggestedValues ?? column.topValues)
@@ -394,5 +456,6 @@ function describeEnumTarget(
 export function toolKindFromName(name: string): ToolKind | null {
   if (name.startsWith('search_')) return 'search';
   if (name.startsWith('check_availability_')) return 'check_availability';
+  if (name.startsWith('suggest_filter_values_')) return 'suggest_filter_values';
   return null;
 }

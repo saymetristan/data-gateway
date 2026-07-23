@@ -1,11 +1,17 @@
 ---
 title: 'Políticas de Retrieval'
-description: 'Actualiza sinónimos en caliente sin reindexar ni sacar la fuente de agent_ready.'
+description: 'Ajusta vocabulario, comportamiento implícito y ranking sin reindexar.'
 ---
 
 # Políticas de Retrieval
 
-Una política de retrieval es un documento versionado, separado del mapping, que controla vocabulario de consulta. En la primera versión del contrato administra `synonyms.entries` por entidad.
+Una política de retrieval es un documento versionado, separado del mapping, que controla comportamiento de consulta en caliente. Puede ajustar por entidad:
+
+- sinónimos léxicos;
+- aliases de campos;
+- comportamiento implícito `filter`, `prefer` o `search`;
+- boost de preferencias;
+- pesos lexical/vector de la fusión RRF.
 
 <Info>
   Crear, evaluar o activar una política no modifica `records`, embeddings ni
@@ -14,15 +20,75 @@ Una política de retrieval es un documento versionado, separado del mapping, que
 
 ## Mapping vs. política
 
-Usa una política para cambios de vocabulario que solo afectan el query-time:
+Usa una política para cambios que solo afectan el query-time:
 
 - términos equivalentes del negocio;
 - nombres comerciales, regionalismos y errores frecuentes;
 - vocabulario estacional que ya existe en los campos indexados.
+- aliases con los que un usuario menciona un campo;
+- decisión temporal de filtrar, priorizar o conservar una coincidencia en texto libre;
+- calibración de boosts y pesos RRF.
 
-Modifica el mapping y reindexa cuando cambien campos `searchable`, `searchWeight`, reglas, filtros, entidades o `embeddingTextTemplate`. Una política no puede hacer searchable un dato que no está en el índice.
+Modifica el mapping y reindexa cuando cambien campos `searchable`, `searchWeight`, `cardinality`, operadores predeterminados, reglas, filtros, entidades o `embeddingTextTemplate`. Una política no puede hacer searchable ni filterable un dato que el mapping no permite.
 
-Al consultar, el Gateway carga en batch la política activa. Si la política contiene la entidad solicitada, sus sinónimos reemplazan los sinónimos legacy del mapping para esa entidad. Si no hay política o no cubre la entidad, conserva el mapping como fallback.
+Al consultar, el Gateway carga en batch la política activa. Los aliases de policy se agregan a los aliases del mapping. Si la policy contiene sinónimos para la entidad, reemplazan los sinónimos legacy de esa entidad; si no la cubre, el mapping sigue como fallback.
+
+## Documento de ejemplo
+
+```json
+{
+  "document": {
+    "entities": [
+      {
+        "entity": "variant",
+        "synonyms": {
+          "entries": {
+            "vinipiel": ["piel sintética", "ecocuero"],
+            "retapizar": ["tapicería", "tapizar"]
+          }
+        },
+        "fields": [
+          {
+            "field": "collections",
+            "aliases": ["línea", "temporada"],
+            "implicitBehavior": "prefer",
+            "boost": 0.35
+          }
+        ],
+        "rrf": {
+          "lexicalWeight": 1,
+          "vectorWeight": 1.1
+        }
+      }
+    ]
+  },
+  "expectedActiveVersion": 3
+}
+```
+
+Una entidad debe definir al menos `synonyms`, `fields` o `rrf`.
+
+### Configuración por campo
+
+- `field`: nombre público exacto del mapping.
+- `aliases`: nombres adicionales que el usuario puede emplear.
+- `implicitBehavior`: solo controla coincidencias implícitas en texto libre. Una mención explícita como `"color blanco"` sigue siendo filtro duro.
+- `boost`: fuerza de la preferencia entre `0` y `1`.
+
+El campo debe existir, ser visible, no sensible y filterable en el mapping activo. La cardinalidad y el operador predeterminado siguen perteneciendo al mapping.
+
+<Warning>
+  Aunque el contrato de policy reserva `valueAliases` y `match`, no los uses como overrides
+  operativos hasta que aparezcan reflejados en capabilities. Envía valores canónicos de
+  `suggestedValues` y define `match` en el mapping.
+</Warning>
+
+### Pesos RRF
+
+- `lexicalWeight`: peso positivo de la búsqueda full-text.
+- `vectorWeight`: peso positivo de la similitud semántica.
+
+Empieza con los valores del mapping y cambia los pesos solo con evals representativos. Un peso mayor no garantiza mejor calidad para todos los queries.
 
 ## Estados y activación
 
@@ -46,7 +112,8 @@ draft → active → archived
 - Scopes mínimos: `retrieval:read` y `retrieval:write`.
 - RLS y validación de ownership por `workspace_id`.
 - Entidades limitadas a las que existen en el mapping activo.
+- Campos limitados a campos filterable, visibles y no sensibles del mapping activo.
 - Términos vacíos, auto-sinónimos y duplicados normalizados se rechazan.
 - Cada eval run conserva el `retrievalPolicyId` evaluado.
 
-Siguiente: [Actualizar sinónimos](/onboarding/synonym-updates).
+Configura primero el contrato estable en [Búsquedas y Filtros](/onboarding/configure-search). Para un cambio solo de vocabulario, sigue [Actualizar sinónimos](/onboarding/synonym-updates).
