@@ -25,3 +25,4 @@
 - Integration coverage for filter-only queries and 422 on unsafe fields.
 - Shopify eval fixtures aligned to `contains` / preference semantics for collections.
 - Mintlify broken-link check passed; OpenAPI 3.1 contract validated successfully.
+- Production deploy: merged PR #6 to `main` (`7c03016`); Railway `api`/`worker` SUCCESS; `GET https://data.whaapy.com/health` → 200 `{"status":"ok","db":"connected"}`. No new DB migrations.
