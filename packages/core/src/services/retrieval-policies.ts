@@ -166,12 +166,50 @@ export async function getRetrievalPolicyById(
   return policy;
 }
 
+export type ActiveRetrievalPoliciesResult = {
+  policies: Map<string, ActiveRetrievalPolicy>;
+  warnings: string[];
+};
+
+export type StoredRetrievalPolicyRow = {
+  id: string;
+  sourceId: string;
+  version: number;
+  document: unknown;
+};
+
+/** Fail-open parse for persisted active policies used at query-time. */
+export function parseStoredActivePolicy(
+  row: StoredRetrievalPolicyRow,
+): { policy: ActiveRetrievalPolicy } | { warning: string } {
+  const parsed = retrievalPolicyDocumentSchema.safeParse(row.document);
+  if (!parsed.success) {
+    return {
+      warning: `Active retrieval policy v${String(row.version)} for source ${row.sourceId} is invalid and was ignored; using mapping synonyms`,
+    };
+  }
+  return {
+    policy: {
+      id: row.id,
+      sourceId: row.sourceId,
+      version: row.version,
+      document: parsed.data,
+    },
+  };
+}
+
+/**
+ * Loads active policies for query-time. Invalid persisted documents are omitted
+ * (fail-open) so a corrupt policy never turns every search into HTTP 500.
+ */
 export async function getActiveRetrievalPoliciesForSources(
   db: Database,
   workspaceId: string,
   sourceIds: string[],
-) {
-  if (sourceIds.length === 0) return new Map<string, ActiveRetrievalPolicy>();
+): Promise<ActiveRetrievalPoliciesResult> {
+  if (sourceIds.length === 0) {
+    return { policies: new Map(), warnings: [] };
+  }
   const rows = await db
     .select()
     .from(sourceRetrievalPolicies)
@@ -182,17 +220,18 @@ export async function getActiveRetrievalPoliciesForSources(
         eq(sourceRetrievalPolicies.status, 'active'),
       ),
     );
-  return new Map(
-    rows.map((row) => [
-      row.sourceId,
-      {
-        id: row.id,
-        sourceId: row.sourceId,
-        version: row.version,
-        document: retrievalPolicyDocumentSchema.parse(row.document),
-      },
-    ]),
-  );
+
+  const policies = new Map<string, ActiveRetrievalPolicy>();
+  const warnings: string[] = [];
+  for (const row of rows) {
+    const result = parseStoredActivePolicy(row);
+    if ('warning' in result) {
+      warnings.push(result.warning);
+      continue;
+    }
+    policies.set(row.sourceId, result.policy);
+  }
+  return { policies, warnings };
 }
 
 export async function activateRetrievalPolicy(

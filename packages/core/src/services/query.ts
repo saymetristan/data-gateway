@@ -1036,11 +1036,13 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
   const mappingVersionBySource = new Map(
     queryable.map((source) => [source.id, source.mappingVersion]),
   );
-  const retrievalPolicies = await getActiveRetrievalPoliciesForSources(
+  const loadedPolicies = await getActiveRetrievalPoliciesForSources(
     db,
     input.workspaceId,
     sourceIds,
   );
+  const retrievalPolicies = loadedPolicies.policies;
+  warnings.push(...loadedPolicies.warnings);
   if (input.retrievalPolicyId) {
     const override = await getRetrievalPolicyById(
       db,
@@ -1052,11 +1054,18 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
         'Retrieval policy does not belong to a queryable source in this request',
       );
     }
+    const parsedOverride = retrievalPolicyDocumentSchema.safeParse(override.document);
+    if (!parsedOverride.success) {
+      throw GatewayError.validation(
+        `Retrieval policy version ${String(override.version)} is invalid`,
+        parsedOverride.error.flatten(),
+      );
+    }
     retrievalPolicies.set(override.sourceId, {
       id: override.id,
       sourceId: override.sourceId,
       version: override.version,
-      document: retrievalPolicyDocumentSchema.parse(override.document),
+      document: parsedOverride.data,
     });
   }
 

@@ -15,6 +15,7 @@ import { withTestDatabase } from '../test/db-helper.js';
 import {
   activateRetrievalPolicy,
   createRetrievalPolicyDraft,
+  getActiveRetrievalPoliciesForSources,
   getActiveRetrievalPolicy,
   listRetrievalPolicies,
 } from './retrieval-policies.js';
@@ -201,6 +202,58 @@ describe.runIf(hasDatabase)('retrieval policies integration', () => {
       await expect(
         listRetrievalPolicies(db, otherWorkspace.id, source.id),
       ).rejects.toThrow('Source not found');
+    });
+  });
+
+  it('fails open when an active policy document is invalid', async () => {
+    await withTestDatabase(async (db) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({
+          name: 'Corrupt Policy',
+          slug: `policy-corrupt-${Date.now()}`,
+          settings: {},
+        })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      const [source] = await db
+        .insert(sources)
+        .values({
+          workspaceId: workspace.id,
+          type: 'shopify',
+          name: 'Corrupt Shopify',
+          config: { shopDomain: 'corrupt.myshopify.com' },
+          maturityStatus: 'agent_ready',
+        })
+        .returning();
+      if (!source) throw new Error('source missing');
+
+      await db.insert(sourceRetrievalPolicies).values({
+        workspaceId: workspace.id,
+        sourceId: source.id,
+        version: 1,
+        status: 'active',
+        document: {
+          entities: [
+            {
+              entity: 'variant',
+              synonyms: {
+                entries: {
+                  cuadrille: ['aida'],
+                  cuadrillé: ['aida'],
+                },
+              },
+            },
+          ],
+        },
+      });
+
+      const loaded = await getActiveRetrievalPoliciesForSources(db, workspace.id, [
+        source.id,
+      ]);
+      expect(loaded.policies.size).toBe(0);
+      expect(loaded.warnings[0]).toMatch(/invalid and was ignored/);
     });
   });
 });

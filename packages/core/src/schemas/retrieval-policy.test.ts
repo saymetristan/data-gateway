@@ -1,8 +1,16 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   createRetrievalPolicySchema,
   normalizeVocabularyTerm,
 } from './retrieval-policy.js';
+
+const fixturePath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../../fixtures/bayon-retrieval-policy.json',
+);
 
 describe('retrieval policy schema', () => {
   it('accepts a bounded Bayon synonym document', () => {
@@ -72,5 +80,31 @@ describe('retrieval policy schema', () => {
 
   it('normalizes accents, case, and whitespace for comparisons', () => {
     expect(normalizeVocabularyTerm('  Cuadrillé  AIDA ')).toBe('cuadrille aida');
+  });
+
+  it('accepts the Bayon retrieval policy fixture', () => {
+    const fixture = JSON.parse(readFileSync(fixturePath, 'utf8')) as unknown;
+    expect(createRetrievalPolicySchema.safeParse(fixture).success).toBe(true);
+  });
+
+  it('rejects accent-equivalent term keys like the invalid Bayon v1 payload', () => {
+    const parsed = createRetrievalPolicySchema.safeParse({
+      document: {
+        entities: [
+          {
+            entity: 'variant',
+            synonyms: {
+              entries: {
+                caneva: ['etamina'],
+                canevá: ['etamina'],
+                cuadrille: ['aida'],
+                cuadrillé: ['aida'],
+              },
+            },
+          },
+        ],
+      },
+    });
+    expect(parsed.success).toBe(false);
   });
 });
