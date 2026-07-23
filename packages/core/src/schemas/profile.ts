@@ -2,6 +2,14 @@ import { z } from 'zod';
 
 const profileValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
+export const profileAtomicValueSchema = z.object({
+  /** Canonical value used for matching and filters. */
+  value: z.union([z.string(), z.number(), z.boolean()]),
+  /** Optional display label when it differs from the canonical value. */
+  displayValue: z.string().optional(),
+  count: z.number().int().nonnegative(),
+});
+
 export const profileColumnSchema = z.object({
   name: z.string(),
   inferredType: z.enum(['string', 'number', 'boolean', 'date', 'datetime', 'json', 'unknown']),
@@ -20,6 +28,12 @@ export const profileColumnSchema = z.object({
       count: z.number().int().nonnegative(),
     }),
   ).optional(),
+  /**
+   * Atomic members for array/CSV-like JSON columns (e.g. collections).
+   * Used by NL extraction, capabilities, and tool enums.
+   */
+  atomicValues: z.array(profileAtomicValueSchema).optional(),
+  atomicValuesTruncated: z.boolean().optional(),
   enumCandidate: z.boolean().optional(),
   jsonShape: z.record(
     z.string(),

@@ -1,0 +1,142 @@
+---
+title: 'Consultas y Filtros'
+description: 'Contrato REST para descubrir capacidades y ejecutar búsquedas estructuradas.'
+---
+
+# Consultas y Filtros
+
+La integración REST usa dos endpoints:
+
+1. `GET /query/capabilities` para descubrir el contrato permitido.
+2. `POST /query` para ejecutar texto libre, filtros, preferencias o una combinación.
+
+Ambos requieren una API key con scope `query:execute`.
+
+## Descubrir capacidades
+
+```http
+GET /query/capabilities?sourceId={uuid}&entity=variant
+Authorization: Bearer {workspace_key}
+```
+
+Parámetros opcionales:
+
+- `sourceId`: limita la respuesta a una fuente del workspace.
+- `entity`: limita la respuesta al nombre público de una entidad.
+
+Cada campo incluye:
+
+- identidad y presentación: `field`, `label`, `filterLabel`, `description`, `aliases`;
+- contrato: `type`, `cardinality`, `operators`, `filterable`, `preferable`;
+- retrieval: `inferredBehavior`, `match`, `boost`;
+- catálogo: `suggestedValues`, `suggestedValuesTruncated`, y `min` / `max` cuando aplican.
+
+Los valores sugeridos incluyen `value` y su frecuencia aproximada `count`. El catálogo puede estar truncado y no constituye una enumeración obligatoria.
+
+## Ejecutar una consulta
+
+```http
+POST /query
+Authorization: Bearer {workspace_key}
+Content-Type: application/json
+```
+
+El body debe incluir al menos uno de:
+
+- `query`: string no vacío;
+- `filters`: uno o más filtros;
+- `preferences`: una o más preferencias.
+
+Propiedades opcionales:
+
+- `sourceId`: UUID de una fuente.
+- `entity`: entidad pública del mapping.
+- `limit`: entero entre `1` y `50`; default `10`.
+- `useLlmFallback`: default `false`. El query path determinístico funciona sin LLM.
+
+## Filtro tipado
+
+```json
+{
+  "field": "price",
+  "op": "lte",
+  "value": 500
+}
+```
+
+`value` acepta string, number, boolean o un array de esos escalares. La combinación válida depende de `type`, `cardinality` y `operators` publicados en capabilities.
+
+El shorthand legacy también se acepta:
+
+```json
+{
+  "filters": {
+    "available": true,
+    "brand": ["Bayon", "Otra marca"]
+  }
+}
+```
+
+Este shorthand se normaliza a `eq` para escalares y `in` para arrays. Para contratos nuevos, prefiere siempre el array tipado: expresa la intención y produce errores más claros.
+
+## Preferencia tipada
+
+```json
+{
+  "field": "collections",
+  "op": "contains",
+  "value": "Verano",
+  "boost": 0.3
+}
+```
+
+`boost` es opcional y debe estar entre `0` y `1`. Las preferencias no eliminan candidatos; solo ajustan su ranking.
+
+## Respuesta
+
+```json
+{
+  "results": [
+    {
+      "id": "2516dbea-8ec7-46a4-a696-d123b761c2b0",
+      "entity": "variant",
+      "score": 0.86,
+      "data": {
+        "title": "Tela Exterior Azul",
+        "collections": ["Verano", "Exterior"]
+      }
+    }
+  ],
+  "applied_filters": [{ "field": "available", "op": "eq", "value": true }],
+  "applied_preferences": [
+    {
+      "field": "collections",
+      "op": "contains",
+      "value": "Verano",
+      "boost": 0.3
+    }
+  ],
+  "query_type": "hybrid_search",
+  "confidence": 0.81,
+  "sources_used": ["8b535fe3-79c5-4b67-9328-1913f9f75491"],
+  "warnings": []
+}
+```
+
+- `applied_filters`: restricciones realmente aplicadas, incluidas las inferidas.
+- `applied_preferences`: boosts realmente aplicados.
+- `query_type`: `filter_only`, `lexical` o `hybrid_search`.
+- `confidence`: señal determinística entre `0` y `1`; no es una respuesta generada por LLM.
+- `warnings`: ambigüedades o degradaciones no fatales.
+
+## Errores
+
+- `400`: body o query params con formato inválido.
+- `401`: API key inválida o sin scope.
+- `422`: filtro o preferencia incompatible con el mapping.
+
+Los errores `422` incluyen issues con `path` y `message`. No reintentes el mismo request: corrige la cláusula usando capabilities.
+
+<Card title="Guía de configuración" icon="sliders" href="/onboarding/configure-search">
+  Configura mapping, lenguaje natural, multivalores y pruebas de activación.
+</Card>

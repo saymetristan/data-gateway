@@ -33,14 +33,33 @@ const legacyFiltersSchema = z.record(
   z.union([filterScalarSchema, z.array(filterScalarSchema)]),
 );
 
-export const queryRequestSchema = z.object({
+const queryRequestBaseSchema = z.object({
   entity: z.string().min(1).optional(),
-  query: z.string().min(1),
+  /** Free-text search. Optional when filters or preferences are supplied. */
+  query: z.string().optional(),
   filters: z.union([legacyFiltersSchema, z.array(normalizedFilterSchema)]).optional(),
   preferences: z.array(queryPreferenceSchema).optional(),
   limit: z.coerce.number().int().positive().max(50).default(10),
   sourceId: z.string().uuid().optional(),
   useLlmFallback: z.boolean().optional().default(false),
+});
+
+export const queryRequestSchema = queryRequestBaseSchema.superRefine((value, ctx) => {
+  const hasQuery = typeof value.query === 'string' && value.query.trim().length > 0;
+  const hasFilters = (() => {
+    if (!value.filters) return false;
+    if (Array.isArray(value.filters)) return value.filters.length > 0;
+    return Object.keys(value.filters).length > 0;
+  })();
+  const hasPreferences = (value.preferences?.length ?? 0) > 0;
+
+  if (!hasQuery && !hasFilters && !hasPreferences) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Provide a non-empty query, at least one filter, or at least one preference',
+      path: ['query'],
+    });
+  }
 });
 
 export const queryTypeSchema = z.enum(['filter_only', 'lexical', 'hybrid_search']);
@@ -80,4 +99,12 @@ export function normalizeRequestFilters(
     op: Array.isArray(value) ? 'in' : 'eq',
     value,
   }));
+}
+
+export function requestHasFreeText(request: QueryRequest): boolean {
+  return typeof request.query === 'string' && request.query.trim().length > 0;
+}
+
+export function requestQueryText(request: QueryRequest): string {
+  return typeof request.query === 'string' ? request.query : '';
 }

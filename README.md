@@ -159,12 +159,15 @@ curl -X POST http://localhost:3000/query \
 
 | Campo | Tipo | Notas |
 |-------|------|-------|
-| `query` | string | Obligatorio |
+| `query` | string? | Opcional si hay `filters` o `preferences` |
 | `entity` | string? | Filtra entidad del mapping |
 | `sourceId` | uuid? | Limita a una fuente |
-| `filters` | record? | Filtros explícitos (no pueden anular `defaultFilters`) |
+| `filters` | array\|record? | Filtros explícitos; inválidos → 422; no pueden anular `defaultFilters` |
+| `preferences` | array? | Boosts blandos tipados |
 | `limit` | int | Default 10, max 50 |
 | `useLlmFallback` | bool | Default false |
+
+`GET /query/capabilities` (mismo scope) describe campos, operadores y valores sugeridos seguros.
 
 `workspace_id` sale de la API key, no va en el body.
 

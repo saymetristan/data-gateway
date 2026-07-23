@@ -158,6 +158,9 @@ describe('tool compiler', () => {
     expect(search).toBeDefined();
     expect(search?.description).toContain('Variantes de producto Shopify');
     expect(search?.description).toContain('When to use:');
+    const suggest = tools.find((tool) => tool.name === 'suggest_filter_values_variant');
+    expect(suggest).toBeDefined();
+    expect(suggest?.kind).toBe('suggest_filter_values');
     expect(search?.description).toContain('Never use for:');
     expect(search?.description).toContain('Success criteria:');
     expect(search?.description).toContain('Fallback:');

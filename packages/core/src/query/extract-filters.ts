@@ -141,6 +141,11 @@ export function resolveExtractedMatches(input: {
   matches: ExtractedFieldMatch[];
   fieldsByName: Map<string, MappingField>;
   extraWarnings?: string[];
+  resolveBehavior?: (
+    field: string,
+    origin: 'explicit' | 'implicit',
+  ) => 'filter' | 'prefer' | 'search';
+  resolveBoost?: (field: string) => number | undefined;
 }): ResolveMatchesResult {
   const warnings = [...(input.extraWarnings ?? [])];
   const filters: ResolvedFilter[] = [];
@@ -150,11 +155,13 @@ export function resolveExtractedMatches(input: {
   for (const match of input.matches) {
     const field = input.fieldsByName.get(match.field);
     const retrieval = field ? getFieldRetrieval(field) : undefined;
-    // Mapping policy only controls inferred values. Explicit field hints such as
+    // Mapping/policy only controls inferred values. Explicit field hints such as
     // "color blanco" are user constraints and must remain hard filters.
     const behavior =
-      match.origin === 'explicit' ? 'filter' : (retrieval?.inferredBehavior ?? 'filter');
+      input.resolveBehavior?.(match.field, match.origin) ??
+      (match.origin === 'explicit' ? 'filter' : (retrieval?.inferredBehavior ?? 'filter'));
     const op = match.op;
+    const boost = input.resolveBoost?.(match.field) ?? retrieval?.boost;
 
     if (behavior === 'search') {
       continue;
@@ -165,7 +172,7 @@ export function resolveExtractedMatches(input: {
         field: match.field,
         op,
         value: match.value,
-        ...(retrieval?.boost !== undefined ? { boost: retrieval.boost } : {}),
+        ...(boost !== undefined ? { boost } : {}),
       });
       consumed.push(match.span);
       continue;
@@ -279,25 +286,31 @@ function extractStringFilterMatches(
   field: FilterableTarget,
   column: ProfileColumn | undefined,
 ): StringFilterMatch[] {
+  const atomic =
+    field.retrieval?.cardinality === 'many' && column?.atomicValues
+      ? column.atomicValues.map((item) => String(item.value))
+      : null;
   const values = column?.suggestedValues ?? column?.topValues ?? [];
   const stringValues = values
     .map((item) => item.value)
     .filter((value) => value !== null)
     .map((value) => String(value));
 
-  // Profile may still store legacy CSV for multi-value fields — expand to atoms.
+  // Prefer profiled atomic members for multi-value fields; fall back to CSV split.
   const expandedValues =
-    field.retrieval?.cardinality === 'many'
-      ? [
-          ...new Set(
-            stringValues.flatMap((value) =>
-              value.includes(',')
-                ? value.split(',').map((part) => part.trim()).filter(Boolean)
-                : [value],
+    atomic && atomic.length > 0
+      ? [...new Set(atomic)]
+      : field.retrieval?.cardinality === 'many'
+        ? [
+            ...new Set(
+              stringValues.flatMap((value) =>
+                value.includes(',')
+                  ? value.split(',').map((part) => part.trim()).filter(Boolean)
+                  : [value],
+              ),
             ),
-          ),
-        ]
-      : stringValues;
+          ]
+        : stringValues;
 
   const matches: StringFilterMatch[] = [];
   const normalizedQuery = normalizeText(query);

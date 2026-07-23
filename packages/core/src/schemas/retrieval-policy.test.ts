@@ -63,14 +63,39 @@ describe('retrieval policy schema', () => {
     expect(parsed.success).toBe(false);
   });
 
-  it('rejects undeclared policy fields', () => {
+  it('accepts field policies and query-time rrf overrides', () => {
+    const parsed = createRetrievalPolicySchema.parse({
+      document: {
+        entities: [
+          {
+            entity: 'variant',
+            synonyms: { entries: { aida: ['cuadrille'] } },
+            fields: [
+              {
+                field: 'collections',
+                aliases: ['linea', 'línea'],
+                implicitBehavior: 'filter',
+                match: 'contains',
+                boost: 0.4,
+              },
+            ],
+            rrf: { lexicalWeight: 1.2, vectorWeight: 1 },
+          },
+        ],
+      },
+    });
+    expect(parsed.document.entities[0]?.fields[0]?.field).toBe('collections');
+    expect(parsed.document.entities[0]?.rrf?.lexicalWeight).toBe(1.2);
+  });
+
+  it('rejects undeclared nested policy properties', () => {
     const parsed = createRetrievalPolicySchema.safeParse({
       document: {
         entities: [
           {
             entity: 'variant',
             synonyms: { entries: { aida: ['cuadrille'] } },
-            rrf: { lexicalWeight: 99 },
+            unknown: true,
           },
         ],
       },

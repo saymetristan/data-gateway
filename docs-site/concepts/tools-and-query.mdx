@@ -1,6 +1,6 @@
 ---
-title: "Tools y Consultas"
-description: "Diferencia entre llamar al motor de búsqueda directamente y consumirlo vía MCP."
+title: 'Tools y Consultas'
+description: 'Diferencia entre llamar al motor de búsqueda directamente y consumirlo vía MCP.'
 ---
 
 # Tools y Consultas Directas
@@ -15,16 +15,34 @@ El Data Gateway proporciona dos formas distintas de acceder a tus datos integrad
 - **Herramientas generadas:**
   - `search_<entidad>`: Búsqueda híbrida. Recibe `query` (texto libre), `limit`, filtros por campos `filterable`, y opcionalmente `prefer_<campo>` cuando el mapping marca `inferredBehavior: "prefer"`.
   - `check_availability_<entidad>`: Recupera un registro exacto si el agente ya conoce su identificador.
+  - `suggest_filter_values_<entidad>`: Sugiere valores canónicos (colecciones, categorías, etc.) antes de filtrar.
 - **Formato:** Sigue la especificación del Model Context Protocol. El agente recibe un esquema JSON y sabe qué variables puede mandar.
 - **Ventaja:** Cero configuración en el agente. Le conectas el servidor MCP y el agente descubre las bases de datos al vuelo.
 
-Detalle de filtros vs preferencias: [Ranking y Preferencias](/concepts/ranking-and-preferences).
+Configuración completa: [Búsquedas y Filtros](/onboarding/configure-search). Detalle conceptual: [Ranking y Preferencias](/concepts/ranking-and-preferences).
 
 ## 2. API REST Directa (`POST /query`)
 
 Si estás desarrollando una aplicación de software, un panel interno o un portal que no usa agentes (o donde controlas el flujo), puedes saltarte la capa MCP.
 
 ```bash
+# Descubre campos/operadores/valores permitidos
+curl "https://data.whaapy.com/query/capabilities?entity=variant" \
+  -H "Authorization: Bearer $WORKSPACE_KEY"
+
+# Solo filtros (sin texto libre)
+curl -X POST "https://data.whaapy.com/query" \
+  -H "Authorization: Bearer $WORKSPACE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filters": [
+      { "field": "collections", "op": "contains", "value": "Verano" },
+      { "field": "price", "op": "lte", "value": 500 }
+    ],
+    "limit": 20
+  }'
+
+# Híbrida: texto + filtros
 curl -X POST "https://data.whaapy.com/query" \
   -H "Authorization: Bearer $WORKSPACE_KEY" \
   -H "Content-Type: application/json" \
@@ -43,14 +61,18 @@ curl -X POST "https://data.whaapy.com/query" \
 
 ### Parámetros
 
-| Campo | Descripción |
-| --- | --- |
-| `query` | Texto libre. También alimenta la extracción NL según el mapping. |
-| `limit` | Máximo de resultados (default 10, max 50). |
-| `entity` / `sourceId` | Acota entidad o fuente. |
-| `filters` | Restricciones **duras**. Legacy `{ "campo": "valor" }` o array tipado `{ field, op, value }`. Ops: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `contains`, `containsAny`, `containsAll`. |
-| `preferences` | Boosts **blandos** post-RRF. Misma forma tipada + `boost` opcional. No excluyen. |
-| `useLlmFallback` | Opcional; extracción NL asistida por LLM sobre texto residual. |
+| Campo                 | Descripción                                                                                                                                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `query`               | Texto libre opcional. Obligatorio solo si no hay `filters` ni `preferences`.                                                                                                                                                   |
+| `limit`               | Máximo de resultados (default 10, max 50).                                                                                                                                                                                     |
+| `entity` / `sourceId` | Acota entidad o fuente.                                                                                                                                                                                                        |
+| `filters`             | Restricciones **duras**. Legacy `{ "campo": "valor" }` o array tipado `{ field, op, value }`. Ops: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `contains`, `containsAny`, `containsAll`. Un filtro inválido responde **422**. |
+| `preferences`         | Boosts **blandos** post-RRF. Misma forma tipada + `boost` opcional. No excluyen.                                                                                                                                               |
+| `useLlmFallback`      | Opcional; extracción NL asistida por LLM sobre texto residual.                                                                                                                                                                 |
+
+`GET /query/capabilities` (scope `query:execute`) lista campos filtrables, operadores, aliases y valores sugeridos sin exponer campos sensibles.
+
+Para construir una integración dinámica, consulta capabilities al iniciar y cuando cambie `mappingVersion`. No hardcodees operadores ni valores a partir del tipo del campo.
 
 ### Respuesta
 

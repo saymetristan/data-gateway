@@ -5,6 +5,9 @@ const MAX_TERMS_PER_ENTITY = 500;
 const MAX_SYNONYMS_PER_TERM = 20;
 const MAX_TERM_LENGTH = 120;
 const MAX_DOCUMENT_CHARS = 100_000;
+const MAX_FIELDS_PER_ENTITY = 50;
+const MAX_ALIASES_PER_FIELD = 20;
+const MAX_VALUE_ALIAS_KEYS = 200;
 
 const synonymValueSchema = z.string().trim().min(1).max(MAX_TERM_LENGTH);
 
@@ -64,6 +67,31 @@ export const retrievalSynonymEntriesSchema = z
     }
   });
 
+export const retrievalPolicyFieldSchema = z
+  .object({
+    field: z.string().trim().min(1).max(100),
+    aliases: z.array(z.string().trim().min(1).max(MAX_TERM_LENGTH)).max(MAX_ALIASES_PER_FIELD).default([]),
+    valueAliases: z
+      .record(
+        z.string().trim().min(1).max(MAX_TERM_LENGTH),
+        z.array(synonymValueSchema).min(1).max(MAX_SYNONYMS_PER_TERM),
+      )
+      .optional()
+      .superRefine((entries, ctx) => {
+        if (!entries) return;
+        if (Object.keys(entries).length > MAX_VALUE_ALIAS_KEYS) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `At most ${String(MAX_VALUE_ALIAS_KEYS)} value alias keys are allowed per field`,
+          });
+        }
+      }),
+    implicitBehavior: z.enum(['filter', 'prefer', 'search']).optional(),
+    match: z.enum(['eq', 'contains', 'containsAny', 'containsAll']).optional(),
+    boost: z.number().min(0).max(1).optional(),
+  })
+  .strict();
+
 export const retrievalPolicyEntitySchema = z
   .object({
     entity: z.string().trim().min(1).max(100),
@@ -71,9 +99,44 @@ export const retrievalPolicyEntitySchema = z
       .object({
         entries: retrievalSynonymEntriesSchema,
       })
-      .strict(),
+      .strict()
+      .optional(),
+    fields: z.array(retrievalPolicyFieldSchema).max(MAX_FIELDS_PER_ENTITY).default([]),
+    rrf: z
+      .object({
+        lexicalWeight: z.number().positive(),
+        vectorWeight: z.number().positive(),
+      })
+      .strict()
+      .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((entity, ctx) => {
+    const hasSynonyms = Boolean(entity.synonyms && Object.keys(entity.synonyms.entries).length > 0);
+    const hasFields = entity.fields.length > 0;
+    const hasRrf = Boolean(entity.rrf);
+    if (!hasSynonyms && !hasFields && !hasRrf) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Entity policy must define synonyms, fields, or rrf',
+      });
+    }
+
+    const seenFields = new Set<string>();
+    for (let index = 0; index < entity.fields.length; index += 1) {
+      const field = entity.fields[index];
+      if (!field) continue;
+      const normalized = field.field.toLowerCase();
+      if (seenFields.has(normalized)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['fields', index, 'field'],
+          message: 'Duplicate field policy',
+        });
+      }
+      seenFields.add(normalized);
+    }
+  });
 
 export const retrievalPolicyDocumentSchema = z
   .object({ entities: z.array(retrievalPolicyEntitySchema).min(1).max(MAX_ENTITIES) })
@@ -115,6 +178,7 @@ export const activateRetrievalPolicySchema = z
   })
   .strict();
 
+export type RetrievalPolicyField = z.infer<typeof retrievalPolicyFieldSchema>;
 export type RetrievalPolicyDocument = z.infer<typeof retrievalPolicyDocumentSchema>;
 export type CreateRetrievalPolicyInput = z.infer<typeof createRetrievalPolicySchema>;
 export type ActivateRetrievalPolicyInput = z.infer<

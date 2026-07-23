@@ -109,6 +109,16 @@ El workspace ya quedó configurado vía `project-setup` + yuntro; nada de esto s
 - Tests: 65 passing (unit extractor/RRF/confidence/shaping/LLM + integration E2E fixture + scope API)
 - STOP — revisión humana antes de fase 4
 
+### Fase 3b: Robust client filters (contrato público) — COMPLETADA
+
+- `query` opcional: filter-only / preference-only / híbrida
+- Validación estricta de filtros estructurados → HTTP 422 (no ignore silencioso)
+- `GET /query/capabilities` para campos, operadores y valores sugeridos seguros
+- Profiling de valores atómicos en arrays JSON (`collections`, tags, etc.)
+- Retrieval policy ampliada: field aliases/behaviors + RRF query-time
+- Tool `suggest_filter_values_<entity>` para descubrimiento de valores canónicos
+- Change record: `docs/changes/2026/07/2026-07-23-robust-client-filters.md`
+
 ### Fase 4: Evals como gate de activación — COMPLETADA
 
 - Schemas Zod (`packages/core/src/schemas/evals.ts`): sets, cases (≥1 assertion), runs, métricas tipadas
