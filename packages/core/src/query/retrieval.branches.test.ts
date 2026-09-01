@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveLexicalFusionWeight } from '../services/query.js';
 import { buildLexicalBranches } from './lexical-branches.js';
-import { selectLexicalBranches } from './retrieval.js';
+import { fuseLexicalAndVector, selectLexicalBranches } from './retrieval.js';
 import { reciprocalRankFusion } from './rrf.js';
 
 describe('selectLexicalBranches', () => {
@@ -42,5 +42,34 @@ describe('multi-branch RRF preference for distinctive hits', () => {
       ['Aida'],
     );
     expect(plain).toBe(1);
+  });
+
+  it('keeps an exact identifier match ahead of vector neighbors', () => {
+    const result = fuseLexicalAndVector({
+      lexicalRows: [
+        {
+          id: 'exact',
+          entity: 'product',
+          source_id: 'source-1',
+          data: { sku: 'FF-213' },
+          search_source: 'Filtro FF-213',
+          identifier_match: true,
+        },
+      ],
+      vectorRows: [
+        {
+          id: 'semantic',
+          entity: 'product',
+          source_id: 'source-1',
+          data: { sku: 'OTHER' },
+          search_source: 'Filtro semánticamente cercano',
+          distance: 0.01,
+        },
+      ],
+      limit: 5,
+    });
+
+    expect(result.hits[0]?.id).toBe('exact');
+    expect(result.hits[0]?.score).toBe(1);
   });
 });
