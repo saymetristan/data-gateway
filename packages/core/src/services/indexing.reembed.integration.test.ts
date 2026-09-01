@@ -88,6 +88,12 @@ describe.runIf(hasDatabase)('indexing re-embed integration', () => {
         1,
         providerA,
       );
+      await db.execute(sql`
+        UPDATE pgboss.job
+        SET state = 'completed', completed_on = now()
+        WHERE name = 'embeddings.generate'
+          AND data->>'sourceId' = ${source.id}
+      `);
 
       const providerB = new (class extends MockEmbeddingProvider {
         override readonly model = 'mock-embedding-b';
