@@ -77,4 +77,5 @@ jobs:
         run: pnpm typecheck
 
       - name: Test
-        run: pnpm test
+        # Integration suites share the fixture DB and pg-boss schema.
+        run: pnpm test -- --no-file-parallelism --maxWorkers=1

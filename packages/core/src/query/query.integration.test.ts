@@ -148,7 +148,7 @@ describe.runIf(hasFixture)('query integration', () => {
     });
   });
 
-  it('aplica default filters aunque el request intente contradecirlos', async () => {
+  it('rechaza intentos de contradecir default filters', async () => {
     await withTestDatabase(async (db, testUrl) => {
       const [workspace] = await db
         .insert(workspaces)
@@ -158,22 +158,21 @@ describe.runIf(hasFixture)('query integration', () => {
 
       await bootstrapSource(db, testUrl, workspace.id);
 
-      const response = await executeQuery({
-        db,
-        workspaceId: workspace.id,
-        request: {
-          query: 'camiseta roja',
-          filters: { available: false },
-          limit: 50,
-        },
-        embeddingProvider: new MockEmbeddingProvider(1024),
+      await expect(
+        executeQuery({
+          db,
+          workspaceId: workspace.id,
+          request: {
+            query: 'camiseta roja',
+            filters: { available: false },
+            limit: 50,
+          },
+          embeddingProvider: new MockEmbeddingProvider(1024),
+        }),
+      ).rejects.toMatchObject({
+        code: 'unprocessable_entity',
+        status: 422,
       });
-
-      expect(response.query_type).toBe('hybrid_search');
-      expect(response.applied_filters).toContainEqual({ field: 'available', op: 'eq', value: true });
-      for (const result of response.results) {
-        expect(Number(result.data.stock)).toBeGreaterThan(0);
-      }
     });
   });
 

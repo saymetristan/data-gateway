@@ -288,6 +288,9 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
     const needsEmbedding =
       hasFreeText &&
       prepared.sourceIds.some((sourceId) => prepared.embeddingsAvailableBySource.get(sourceId));
+    if (hasFreeText && !needsEmbedding) {
+      warnings.push('No embeddings available for source; using lexical search only');
+    }
 
     // Free-text for a possible relaxation retry: original query (terms stripped by
     // over-eager implicit filters are restored for FTS).

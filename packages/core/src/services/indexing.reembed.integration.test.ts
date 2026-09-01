@@ -180,7 +180,7 @@ describe.runIf(hasDatabase)('indexing re-embed integration', () => {
 
       await db
         .update(mappings)
-        .set({ status: 'inactive' })
+        .set({ status: 'draft' })
         .where(and(eq(mappings.sourceId, source.id), eq(mappings.version, 1)));
 
       await db.insert(mappings).values({
