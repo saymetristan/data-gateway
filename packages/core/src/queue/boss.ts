@@ -1,5 +1,6 @@
 import PgBoss from 'pg-boss';
 import {
+  ALL_JOB_QUEUES,
   SOURCE_INDEX_JOB,
   SOURCE_INDEX_SINGLETON_MINUTES,
   type SourceIndexJobData,
@@ -27,6 +28,9 @@ export async function getQueue(connectionString: string): Promise<PgBoss> {
       deleteAfterDays: PGBOSS_DELETE_AFTER_DAYS,
     });
     await bossInstance.start();
+    for (const queue of ALL_JOB_QUEUES) {
+      await bossInstance.createQueue(queue);
+    }
   }
   return bossInstance;
 }
