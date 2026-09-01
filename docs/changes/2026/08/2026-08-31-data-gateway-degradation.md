@@ -112,8 +112,8 @@ Production rollout:
 Production verification on 2026-09-01:
 
 - PR #7 merged to `main` as `02a11ca`.
-- API deployment `54f5fcc7-98d5-4a74-9325-e664d4b578a9` and worker deployment
-  `86a4b2b2-2ac5-42f2-974b-fde9d0a440d1` succeeded.
+- API deployment `54f5fcc7-98d5-4a74-9325-e664d4b578a9` and final clean worker
+  deployment `e79ff72b-10c8-4012-9823-fc89fb190ba3` succeeded.
 - Arysa profile-only sync `e10a50f1-a754-44f4-b9da-52928f10821e` completed,
   followed only by profile job `8b78378a-1f62-4106-a0bd-1aa6e6809a79`.
   No source-index job was created.
