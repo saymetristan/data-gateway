@@ -4,8 +4,8 @@ import { mappings, records, sourceRecordsRaw, sources } from '../db/schema/index
 import { createDatabaseConnector } from '../connectors/factory.js';
 import { GatewayError } from '../errors/gateway-error.js';
 import { payloadHash } from '../utils/hash.js';
-import { enqueueJob } from '../queue/boss.js';
-import { SOURCE_INDEX_JOB, SOURCE_PROFILE_JOB } from '../queue/jobs.js';
+import { enqueueJob, enqueueSourceIndexJob } from '../queue/boss.js';
+import { SOURCE_PROFILE_JOB } from '../queue/jobs.js';
 import { getDecryptedSourceConfig, updateSourceConfig } from './sources.js';
 import type { TableSchema } from '../connectors/types.js';
 import { toScalarString } from '../utils/scalar.js';
@@ -26,7 +26,7 @@ export async function syncDatabaseSource(
   workspaceId: string,
   encryptionKey: string,
   connectionString: string,
-  options: { fullSync?: boolean } = {},
+  options: { fullSync?: boolean; indexAfterSync?: boolean } = {},
 ): Promise<{ synced: number; tables: string[] }> {
   const [source] = await db
     .select()
@@ -42,8 +42,7 @@ export async function syncDatabaseSource(
   }
 
   const config = getDecryptedSourceConfig(source, encryptionKey);
-  const connectionUrl =
-    typeof config.connectionUrl === 'string' ? config.connectionUrl : '';
+  const connectionUrl = typeof config.connectionUrl === 'string' ? config.connectionUrl : '';
   const configuredTables = Array.isArray(config.tables) ? (config.tables as string[]) : undefined;
   const syncState = (config.syncState as SyncState | undefined) ?? {};
 
@@ -171,7 +170,7 @@ export async function syncDatabaseSource(
     }
 
     if (options.fullSync) {
-      await removeStaleRecords(db, sourceId, seenRecordIdsByTable);
+      await removeStaleRecords(db, sourceId, seenRecordIdsByTable, options.indexAfterSync ?? true);
     }
 
     await updateSourceConfig(db, sourceId, workspaceId, { syncState }, encryptionKey);
@@ -181,7 +180,13 @@ export async function syncDatabaseSource(
       .set({ lastSyncedAt: new Date(), updatedAt: new Date() })
       .where(eq(sources.id, sourceId));
 
-    await enqueuePostSyncJobs(db, sourceId, workspaceId, connectionString);
+    await enqueuePostSyncJobs(
+      db,
+      sourceId,
+      workspaceId,
+      connectionString,
+      options.indexAfterSync ?? true,
+    );
 
     return { synced, tables: tables.map((table) => `${table.schema}.${table.name}`) };
   } finally {
@@ -194,8 +199,11 @@ async function enqueuePostSyncJobs(
   sourceId: string,
   workspaceId: string,
   connectionString: string,
+  indexAfterSync: boolean,
 ): Promise<void> {
   await enqueueJob(connectionString, SOURCE_PROFILE_JOB, { sourceId, workspaceId });
+
+  if (!indexAfterSync) return;
 
   const [activeMapping] = await db
     .select({ id: mappings.id })
@@ -205,22 +213,18 @@ async function enqueuePostSyncJobs(
     .limit(1);
 
   if (!activeMapping) return;
-  await enqueueJob(
-    connectionString,
-    SOURCE_INDEX_JOB,
-    {
-      sourceId,
-      workspaceId,
-      invalidateMaturity: false,
-    },
-    { singletonKey: `source-index:${sourceId}` },
-  );
+  await enqueueSourceIndexJob(connectionString, {
+    sourceId,
+    workspaceId,
+    invalidateMaturity: false,
+  });
 }
 
 async function removeStaleRecords(
   db: Database,
   sourceId: string,
   seenRecordIdsByTable: Map<string, Set<string>>,
+  deleteIndexedRecords: boolean,
 ): Promise<void> {
   const rawRows = await db
     .select({ id: sourceRecordsRaw.id, sourceRecordId: sourceRecordsRaw.sourceRecordId })
@@ -238,6 +242,8 @@ async function removeStaleRecords(
 
     liveExternalIds.add(externalIdFromSourceRecordId(row.sourceRecordId));
   }
+
+  if (!deleteIndexedRecords) return;
 
   const existingRecords = await db
     .select({ id: records.id, externalId: records.externalId })
@@ -275,11 +281,7 @@ function classifyTable(table: TableSchema): 'entity' | 'lookup' | 'junction' | '
     (column) => !primaryKey.has(column.name) && !foreignKeyColumns.has(column.name),
   );
 
-  if (
-    table.primaryKey.length >= 2 &&
-    table.foreignKeys.length >= 2 &&
-    nonKeyColumns.length <= 1
-  ) {
+  if (table.primaryKey.length >= 2 && table.foreignKeys.length >= 2 && nonKeyColumns.length <= 1) {
     return 'junction';
   }
 

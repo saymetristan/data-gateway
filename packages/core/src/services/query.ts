@@ -1,7 +1,7 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { withWorkspaceContext } from '../db/rls.js';
-import { queryLogs, recordEmbeddings, records, sources } from '../db/schema/index.js';
+import { queryLogs, sources } from '../db/schema/index.js';
 import { GatewayError } from '../errors/gateway-error.js';
 import type {
   EmbeddingAttemptMeta,
@@ -1335,28 +1335,33 @@ async function resolveEmbeddingsAvailability(
   const availability = new Map<string, boolean>();
   if (sourceIds.length === 0) return availability;
 
-  const rows = await db
-    .select({
-      sourceId: records.sourceId,
-      mappingVersion: recordEmbeddings.mappingVersion,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(recordEmbeddings)
-    .innerJoin(records, eq(records.id, recordEmbeddings.recordId))
-    .where(
-      and(
-        inArray(records.sourceId, sourceIds),
-        eq(recordEmbeddings.embeddingModel, embeddingModel),
-      ),
+  const requested = sourceIds.flatMap((sourceId) => {
+    const mappingVersion = mappingVersionBySource.get(sourceId);
+    return mappingVersion === undefined
+      ? []
+      : [{ source_id: sourceId, mapping_version: mappingVersion }];
+  });
+  const result = await db.execute<{ source_id: string }>(sql`
+    WITH requested AS (
+      SELECT source_id, mapping_version
+      FROM jsonb_to_recordset(${JSON.stringify(requested)}::jsonb)
+        AS requested(source_id uuid, mapping_version integer)
     )
-    .groupBy(records.sourceId, recordEmbeddings.mappingVersion);
-
+    SELECT requested.source_id::text AS source_id
+    FROM requested
+    WHERE EXISTS (
+      SELECT 1
+      FROM record_embeddings
+      INNER JOIN records ON records.id = record_embeddings.record_id
+      WHERE records.source_id = requested.source_id
+        AND record_embeddings.embedding_model = ${embeddingModel}
+        AND record_embeddings.mapping_version = requested.mapping_version
+      LIMIT 1
+    )
+  `);
+  const availableSourceIds = new Set(result.rows.map((row) => row.source_id));
   for (const sourceId of sourceIds) {
-    const version = mappingVersionBySource.get(sourceId);
-    const row = rows.find(
-      (item) => item.sourceId === sourceId && item.mappingVersion === version,
-    );
-    availability.set(sourceId, Boolean(row && row.count > 0 && version !== undefined));
+    availability.set(sourceId, availableSourceIds.has(sourceId));
   }
 
   return availability;

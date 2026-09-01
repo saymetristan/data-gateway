@@ -16,6 +16,17 @@ export const operationalMetricsSchema = z.object({
       count: z.number().int().nonnegative(),
     }),
   ),
+  embeddingIngestion: z.object({
+    pendingJobs: z.number().int().nonnegative(),
+    activeJobs: z.number().int().nonnegative(),
+    retryJobs: z.number().int().nonnegative(),
+    pendingRecords: z.number().int().nonnegative(),
+    oldestPendingAt: z.string().nullable(),
+    completedRecords15m: z.number().int().nonnegative(),
+    completedRecords60m: z.number().int().nonnegative(),
+    jobDurationMsP50: z.number().nullable(),
+    jobDurationMsP95: z.number().nullable(),
+  }),
   sync: z.object({
     webhookEvents: z.array(
       z.object({

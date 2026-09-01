@@ -1,10 +1,20 @@
 import PgBoss from 'pg-boss';
+import {
+  SOURCE_INDEX_JOB,
+  SOURCE_INDEX_SINGLETON_MINUTES,
+  type SourceIndexJobData,
+} from './jobs.js';
 
 let bossInstance: PgBoss | null = null;
 
 /** Keep completed jobs briefly, then drop archive rows aggressively (archive was 547MB). */
 const PGBOSS_ARCHIVE_COMPLETED_AFTER_SECONDS = 3_600;
 const PGBOSS_DELETE_AFTER_DAYS = 2;
+
+/** Reuse an already-started queue inside the worker instead of opening another pool. */
+export function bindQueue(instance: PgBoss): void {
+  bossInstance = instance;
+}
 
 export async function getQueue(connectionString: string): Promise<PgBoss> {
   if (!bossInstance) {
@@ -29,6 +39,16 @@ export async function enqueueJob(
 ): Promise<string | null> {
   const boss = await getQueue(connectionString);
   return boss.send(jobName, data, options);
+}
+
+export async function enqueueSourceIndexJob(
+  connectionString: string,
+  data: SourceIndexJobData,
+): Promise<string | null> {
+  return enqueueJob(connectionString, SOURCE_INDEX_JOB, data, {
+    singletonKey: `source-index:${data.sourceId}`,
+    singletonMinutes: SOURCE_INDEX_SINGLETON_MINUTES,
+  });
 }
 
 export async function closeQueue(): Promise<void> {

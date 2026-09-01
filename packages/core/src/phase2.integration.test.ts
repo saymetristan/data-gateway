@@ -26,15 +26,16 @@ import { withTestDatabase } from './test/db-helper.js';
 import type { MappingDocument } from './schemas/mapping.js';
 import type { LlmProvider } from './providers/llm.js';
 
-const hasFixture =
-  process.env.RUN_INTEGRATION_TESTS === 'true' || process.env.CI === 'true';
+const hasFixture = process.env.RUN_INTEGRATION_TESTS === 'true' || process.env.CI === 'true';
 const FIXTURE_URL =
   process.env.FIXTURE_DATABASE_URL ??
   'postgresql://readonly_user:readonly_pass@localhost:5433/catalog';
-const FIXTURE_WRITE_URL = FIXTURE_URL.replace('readonly_user:readonly_pass', 'write_user:write_pass');
+const FIXTURE_WRITE_URL = FIXTURE_URL.replace(
+  'readonly_user:readonly_pass',
+  'write_user:write_pass',
+);
 const ENCRYPTION_KEY =
-  process.env.CREDENTIALS_ENCRYPTION_KEY ??
-  Buffer.alloc(32, 7).toString('base64');
+  process.env.CREDENTIALS_ENCRYPTION_KEY ?? Buffer.alloc(32, 7).toString('base64');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const seedSql = readFileSync(
@@ -292,16 +293,44 @@ describe.runIf(hasFixture)('phase 2 integration', () => {
         .select()
         .from(sourceRecordsRaw)
         .where(eq(sourceRecordsRaw.sourceId, sourceId));
-      const resync = await syncDatabaseSource(
-        db,
-        sourceId,
-        workspaceId,
-        ENCRYPTION_KEY,
-        testUrl,
-        { fullSync: true },
-      );
+      const [staleIndexedRecord] = await db
+        .insert(records)
+        .values({
+          workspaceId,
+          sourceId,
+          entity: 'product',
+          externalId: 'stale-preview-record',
+          mappingVersion: mapping.version,
+          data: { name: 'Keep until an explicit reindex' },
+        })
+        .returning({ id: records.id });
+      if (!staleIndexedRecord) throw new Error('stale indexed record not created');
+
+      const queuePool = new pg.Pool({ connectionString: testUrl });
+      const marker = await queuePool.query<{ marker: Date }>('SELECT clock_timestamp() AS marker');
+      const resync = await syncDatabaseSource(db, sourceId, workspaceId, ENCRYPTION_KEY, testUrl, {
+        fullSync: true,
+        indexAfterSync: false,
+      });
       expect(resync.synced).toBe(0);
       expect(rawCount).toHaveLength(300);
+
+      const [preservedRecord] = await db
+        .select({ id: records.id })
+        .from(records)
+        .where(eq(records.id, staleIndexedRecord.id));
+      expect(preservedRecord?.id).toBe(staleIndexedRecord.id);
+
+      const postSyncJobs = await queuePool.query<{ name: string }>(
+        `SELECT name
+         FROM pgboss.job
+         WHERE data->>'sourceId' = $1
+           AND created_on >= $2
+         ORDER BY name`,
+        [sourceId, marker.rows[0]?.marker],
+      );
+      await queuePool.end();
+      expect(postSyncJobs.rows.map((row) => row.name)).toEqual(['source.profile']);
     });
   });
 
@@ -430,8 +459,9 @@ describe.runIf(hasFixture)('phase 2 integration', () => {
       );
       expect(syncResult.synced).toBeGreaterThanOrEqual(303);
       const profile = await profileSource(db, source.id);
-      expect(profile.tables.find((table) => table.table === 'product_accessories')?.tableRole)
-        .toBe('junction');
+      expect(profile.tables.find((table) => table.table === 'product_accessories')?.tableRole).toBe(
+        'junction',
+      );
 
       await createSourceMapping(db, source.id, workspace.id, {
         document: {

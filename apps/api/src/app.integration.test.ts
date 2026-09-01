@@ -189,27 +189,24 @@ describe.runIf(hasDatabase)('API integration', () => {
       },
     });
 
-    const createRes = await app.request(
-      `/sources/${source.id}/retrieval-policies`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          expectedActiveVersion: 0,
-          document: {
-            entities: [
-              {
-                entity: 'variant',
-                synonyms: { entries: { aida: ['cuadrille aida'] } },
-              },
-            ],
-          },
-        }),
+    const createRes = await app.request(`/sources/${source.id}/retrieval-policies`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
       },
-    );
+      body: JSON.stringify({
+        expectedActiveVersion: 0,
+        document: {
+          entities: [
+            {
+              entity: 'variant',
+              synonyms: { entries: { aida: ['cuadrille aida'] } },
+            },
+          ],
+        },
+      }),
+    });
     expect(createRes.status).toBe(201);
     const created = (await createRes.json()) as {
       version: number;
@@ -217,17 +214,13 @@ describe.runIf(hasDatabase)('API integration', () => {
     };
     expect(created).toMatchObject({ version: 1, status: 'draft' });
 
-    const listRes = await app.request(
-      `/sources/${source.id}/retrieval-policies`,
-      { headers: { Authorization: `Bearer ${key}` } },
-    );
+    const listRes = await app.request(`/sources/${source.id}/retrieval-policies`, {
+      headers: { Authorization: `Bearer ${key}` },
+    });
     expect(listRes.status).toBe(200);
     expect((await listRes.json()) as unknown[]).toHaveLength(1);
 
-    const [unchanged] = await db
-      .select()
-      .from(sources)
-      .where(eq(sources.id, source.id));
+    const [unchanged] = await db.select().from(sources).where(eq(sources.id, source.id));
     expect(unchanged?.maturityStatus).toBe('agent_ready');
   });
 
@@ -484,6 +477,14 @@ describe.runIf(hasDatabase)('API integration', () => {
     expect(body.db).toBe('connected');
   });
 
+  it('readiness degrades when the worker heartbeat is unavailable', async () => {
+    const res = await app.request('/ready');
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { status: string; worker: string };
+    expect(body.status).toBe('degraded');
+    expect(body.worker).toBe('stale');
+  });
+
   it('phase 2 source endpoints return expected status codes', async () => {
     const wsRes = await app.request('/workspaces', {
       method: 'POST',
@@ -589,6 +590,52 @@ describe.runIf(hasDatabase)('API integration', () => {
       }),
     });
     expect(invalidMapping.status).toBe(422);
+  });
+
+  it('queues a profile-only database sync without changing the default contract', async () => {
+    const [workspace] = await db
+      .insert(workspaces)
+      .values({
+        name: 'Profile-only sync',
+        slug: `profile-only-${Date.now()}`,
+        settings: {},
+      })
+      .returning();
+    if (!workspace) throw new Error('workspace missing');
+
+    const generated = generateApiKey();
+    await db.insert(apiKeys).values({
+      workspaceId: workspace.id,
+      keyHash: generated.hash,
+      prefix: generated.prefix,
+      scopes: ['sources:write'],
+    });
+
+    const [source] = await db
+      .insert(sources)
+      .values({
+        workspaceId: workspace.id,
+        type: 'database_url',
+        name: 'Profile-only source',
+        config: encryptSourceConfig('database_url', { connectionUrl: FIXTURE_URL }, ENCRYPTION_KEY),
+      })
+      .returning();
+    if (!source) throw new Error('source missing');
+
+    const response = await app.request(`/sources/${source.id}/sync`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${generated.key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ indexAfterSync: false }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({
+      status: 'queued',
+      indexAfterSync: false,
+    });
   });
 
   it('webhook shopify rechaza HMAC inválido y acepta válido', async () => {

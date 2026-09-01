@@ -31,24 +31,26 @@ const shopifySyncStateSchema = z.object({
   lastSyncedAt: z.string().optional(),
 });
 
-const shopifySourceConfigSchema = z.object({
-  shopDomain: z.string().min(1),
-  accessToken: z.string().min(1).optional(),
-  clientId: z.string().min(1).optional(),
-  clientSecret: z.string().min(1).optional(),
-  webhookSecret: z.string().min(1).optional(),
-  apiVersion: z.string().min(1).optional(),
-  syncState: shopifySyncStateSchema.optional(),
-}).superRefine((config, ctx) => {
-  if (config.accessToken) return;
-  if (config.clientId && config.clientSecret) return;
+const shopifySourceConfigSchema = z
+  .object({
+    shopDomain: z.string().min(1),
+    accessToken: z.string().min(1).optional(),
+    clientId: z.string().min(1).optional(),
+    clientSecret: z.string().min(1).optional(),
+    webhookSecret: z.string().min(1).optional(),
+    apiVersion: z.string().min(1).optional(),
+    syncState: shopifySyncStateSchema.optional(),
+  })
+  .superRefine((config, ctx) => {
+    if (config.accessToken) return;
+    if (config.clientId && config.clientSecret) return;
 
-  ctx.addIssue({
-    code: z.ZodIssueCode.custom,
-    message: 'Shopify config requires either accessToken or clientId/clientSecret',
-    path: ['accessToken'],
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Shopify config requires either accessToken or clientId/clientSecret',
+      path: ['accessToken'],
+    });
   });
-});
 
 export const createSourceSchema = z.discriminatedUnion('type', [
   z.object({
@@ -69,6 +71,14 @@ export const createSourceSchema = z.discriminatedUnion('type', [
 ]);
 
 export type CreateSourceInput = z.infer<typeof createSourceSchema>;
+
+export const syncSourceSchema = z
+  .object({
+    indexAfterSync: z.boolean().optional().default(true),
+  })
+  .strict();
+
+export type SyncSourceInput = z.infer<typeof syncSourceSchema>;
 
 export const workspaceResponseSchema = z.object({
   id: z.string().uuid(),

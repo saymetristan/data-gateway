@@ -23,6 +23,10 @@ export const recordEmbeddings = pgTable(
       table.embeddingModel,
       table.mappingVersion,
     ),
+    index('record_embeddings_model_version_idx').on(
+      table.embeddingModel,
+      table.mappingVersion,
+    ),
     index('record_embeddings_embedding_hnsw_idx').using(
       'hnsw',
       table.embedding.op('vector_cosine_ops'),

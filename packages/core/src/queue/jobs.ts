@@ -2,6 +2,7 @@ export const SOURCE_SYNC_JOB = 'source.sync';
 export const SOURCE_PROFILE_JOB = 'source.profile';
 export const SOURCE_INDEX_JOB = 'source.index';
 export const EMBEDDINGS_GENERATE_JOB = 'embeddings.generate';
+export const EMBEDDINGS_PURGE_STALE_JOB = 'embeddings.purge_stale';
 export const EVALS_RUN_JOB = 'evals.run';
 export const SHOPIFY_WEBHOOK_JOB = 'shopify.webhook';
 export const SHOPIFY_SYNC_SCHEDULED_JOB = 'shopify.sync.scheduled';
@@ -10,6 +11,11 @@ export const QUERY_EMBEDDING_CACHE_PURGE_JOB = 'query.embedding_cache.purge';
 
 export const SOURCE_SYNC_EXPIRE_IN_HOURS = 2;
 export const SOURCE_SYNC_SINGLETON_MINUTES = 10;
+export const SOURCE_INDEX_SINGLETON_MINUTES = 10;
+export const EMBEDDING_JOB_BATCH_SIZE = 500;
+export const EMBEDDING_PROVIDER_BATCH_SIZE = 50;
+export const EMBEDDING_JOB_EXPIRE_HOURS = 2;
+export const SOURCE_INDEX_JOB_EXPIRE_HOURS = 4;
 
 /** Colas que deben existir antes de work/schedule/send (pg-boss v10). */
 export const ALL_JOB_QUEUES = [
@@ -17,6 +23,7 @@ export const ALL_JOB_QUEUES = [
   SOURCE_PROFILE_JOB,
   SOURCE_INDEX_JOB,
   EMBEDDINGS_GENERATE_JOB,
+  EMBEDDINGS_PURGE_STALE_JOB,
   EVALS_RUN_JOB,
   SHOPIFY_WEBHOOK_JOB,
   SHOPIFY_SYNC_SCHEDULED_JOB,
@@ -28,6 +35,7 @@ export type SourceSyncJobData = {
   sourceId: string;
   workspaceId: string;
   fullSync?: boolean;
+  indexAfterSync?: boolean;
 };
 
 export type SourceProfileJobData = {
@@ -54,6 +62,13 @@ export type EmbeddingsGenerateJobData = {
   workspaceId: string;
   recordIds: string[];
   mappingVersion: number;
+};
+
+export type EmbeddingsPurgeStaleJobData = {
+  sourceId: string;
+  workspaceId: string;
+  mappingVersion: number;
+  embeddingModel: string;
 };
 
 export type EvalsRunJobData = {

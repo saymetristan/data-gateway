@@ -191,13 +191,14 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
           signal: AbortSignal.timeout(remaining),
         });
 
-        if (response.status === 429 && attempts <= this.maxRetries) {
+        if ([429, 502, 503, 504].includes(response.status) && attempts <= this.maxRetries) {
           const retryRemaining = budgetMs - (Date.now() - started);
           if (retryRemaining <= 50) {
             timedOut = true;
             break;
           }
-          await sleep(Math.min(200, retryRemaining));
+          const delayMs = retryDelayMs(response.headers.get('Retry-After'), attempts);
+          await sleep(Math.min(delayMs, retryRemaining - 50));
           continue;
         }
 
@@ -245,8 +246,26 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
       : lastError instanceof Error
         ? lastError.message
         : 'Embedding request failed';
-    throw Object.assign(new Error(message), { code: timedOut ? 'TIMEOUT' : 'PROVIDER_ERROR', meta });
+    throw Object.assign(new Error(message), {
+      code: timedOut ? 'TIMEOUT' : 'PROVIDER_ERROR',
+      meta,
+    });
   }
+}
+
+function retryDelayMs(retryAfter: string | null, attempt: number): number {
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return seconds * 1_000;
+    }
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) {
+      return Math.max(0, retryAt - Date.now());
+    }
+  }
+  const exponentialMs = 500 * 2 ** Math.max(0, attempt - 1);
+  return exponentialMs + Math.floor(Math.random() * 250);
 }
 
 function isTimeoutError(error: unknown): boolean {

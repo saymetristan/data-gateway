@@ -12,14 +12,23 @@ const DEFAULT_POOL_MAX = 5;
 const DEFAULT_CONNECTION_TIMEOUT_MS = 5_000;
 const DEFAULT_STATEMENT_TIMEOUT_MS = 10_000;
 
-export function createPool(connectionString: string): pg.Pool {
-  const max = Number(process.env.DATABASE_POOL_MAX ?? DEFAULT_POOL_MAX);
-  const connectionTimeoutMillis = Number(
-    process.env.DATABASE_CONNECTION_TIMEOUT_MS ?? DEFAULT_CONNECTION_TIMEOUT_MS,
-  );
-  const statementTimeoutMs = Number(
-    process.env.DATABASE_STATEMENT_TIMEOUT_MS ?? DEFAULT_STATEMENT_TIMEOUT_MS,
-  );
+export type CreatePoolOptions = {
+  max?: number;
+  connectionTimeoutMs?: number;
+  statementTimeoutMs?: number;
+};
+
+export function createPool(
+  connectionString: string,
+  options: CreatePoolOptions = {},
+): pg.Pool {
+  const max = options.max ?? Number(process.env.DATABASE_POOL_MAX ?? DEFAULT_POOL_MAX);
+  const connectionTimeoutMillis =
+    options.connectionTimeoutMs ??
+    Number(process.env.DATABASE_CONNECTION_TIMEOUT_MS ?? DEFAULT_CONNECTION_TIMEOUT_MS);
+  const statementTimeoutMs =
+    options.statementTimeoutMs ??
+    Number(process.env.DATABASE_STATEMENT_TIMEOUT_MS ?? DEFAULT_STATEMENT_TIMEOUT_MS);
 
   return new pg.Pool({
     connectionString,
@@ -43,6 +52,19 @@ export function getPool(): pg.Pool {
     throw new Error('Database pool not initialised. Call createDb() first.');
   }
   return pool;
+}
+
+export function getPoolStats(): {
+  total: number;
+  idle: number;
+  waiting: number;
+} | null {
+  if (!pool) return null;
+  return {
+    total: pool.totalCount,
+    idle: pool.idleCount,
+    waiting: pool.waitingCount,
+  };
 }
 
 export async function closeDb(): Promise<void> {

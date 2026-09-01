@@ -1,22 +1,14 @@
 import type PgBoss from 'pg-boss';
 import {
-  createDbFromPool,
-  createPool,
+  type Database,
   enqueueShopifyIncrementalSyncs,
   SHOPIFY_SYNC_SCHEDULED_JOB,
 } from '@data-gateway/core';
 import type { WorkerEnv } from '../env.js';
 
-export function registerShopifyScheduledJobs(boss: PgBoss, env: WorkerEnv): void {
+export function registerShopifyScheduledJobs(boss: PgBoss, env: WorkerEnv, db: Database): void {
   void boss.work(SHOPIFY_SYNC_SCHEDULED_JOB, async () => {
-    const pool = createPool(env.DATABASE_URL);
-    const db = createDbFromPool(pool);
-
-    try {
-      await enqueueShopifyIncrementalSyncs(db, env.DATABASE_URL);
-    } finally {
-      await pool.end();
-    }
+    await enqueueShopifyIncrementalSyncs(db, env.DATABASE_URL);
   });
 }
 
