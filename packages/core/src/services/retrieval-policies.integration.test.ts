@@ -101,6 +101,7 @@ describe.runIf(hasDatabase)('retrieval policies integration', () => {
               {
                 entity: 'variant',
                 synonyms: { entries: { aida: ['cuadrille aida'] } },
+                fields: [],
               },
             ],
           },
@@ -165,6 +166,7 @@ describe.runIf(hasDatabase)('retrieval policies integration', () => {
                     etamina: ['caneva'],
                   },
                 },
+                fields: [],
               },
             ],
           },
