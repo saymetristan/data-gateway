@@ -109,6 +109,18 @@ Production rollout:
 - Singleton collisions now return `409` instead of reporting a null job as
   queued, because an existing job may have different indexing semantics.
 
+Production verification on 2026-09-01:
+
+- PR #7 merged to `main` as `02a11ca`.
+- API deployment `54f5fcc7-98d5-4a74-9325-e664d4b578a9` and worker deployment
+  `86a4b2b2-2ac5-42f2-974b-fde9d0a440d1` succeeded.
+- Arysa profile-only sync `e10a50f1-a754-44f4-b9da-52928f10821e` completed,
+  followed only by profile job `8b78378a-1f62-4106-a0bd-1aa6e6809a79`.
+  No source-index job was created.
+- The Arysa product profile changed from 15 to 18 columns, adding
+  `company_name`, `product_group`, and `sat_category`. Active mapping version 2,
+  4,701 indexed records, and 4,701 embeddings remained intact.
+
 ## Verification
 
 - Local: `pnpm lint`, `pnpm typecheck`, and `pnpm test`.
