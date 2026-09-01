@@ -133,6 +133,26 @@ Production verification on 2026-09-01:
   waiters, and autovacuum enabled; this is normal steady-state cleanup.
 - Last query-path 504 was `2026-09-01T06:38:52Z` during the blocking REINDEX.
 
+## Deterministic identifier retrieval
+
+Production follow-up on 2026-09-01:
+
+- PR #9 restored green integration CI by serializing shared database suites,
+  aligning stale fixtures, restoring read-only foreign-key discovery, and
+  ensuring pg-boss v10 queues exist before API-side sends.
+- PR #8 added mapping-driven lookup for explicitly labelled product codes and
+  short code-only queries. Exact normalized identifier matches now precede
+  lexical/vector RRF results without treating unlabelled years, prices, or
+  measurements as identifiers.
+- GitHub CI passed all 254 tests for merge commit `7cceb2e`.
+- Railway API deployment `6ab05585-a3ef-4f5e-90e4-be9ced67af87` and worker
+  deployment `e66eb62f-d684-407c-8def-6ce2e418d488` succeeded.
+- `https://data.whaapy.com/health` returned `status=ok`, `db=connected`; API
+  startup and worker heartbeat logs contained no errors.
+
+Rollback: redeploy the previous successful API and worker releases. No schema
+migration or reindex is required for either rollout or rollback.
+
 ## Residual
 
 - Keep one embedding-job writer and two provider requests until normal ingest
