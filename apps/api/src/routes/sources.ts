@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { and, count, eq } from 'drizzle-orm';
 import {
   createSourceSchema,
+  syncSourceSchema,
   createSourceWithValidation,
   createMappingSchema,
   createRetrievalPolicySchema,
@@ -11,6 +12,7 @@ import {
   createRetrievalPolicyDraft,
   createSourceMapping,
   enqueueJob,
+  enqueueSourceIndexJob,
   GatewayError,
   getActiveMapping,
   getActiveRetrievalPolicy,
@@ -21,12 +23,9 @@ import {
   getSourceStatus,
   ingestCsvUpload,
   listRetrievalPolicies,
-  mappings,
   recordEmbeddings,
   records,
   queueEvalRun,
-  sourceRecordsRaw,
-  SOURCE_INDEX_JOB,
   SOURCE_SYNC_EXPIRE_IN_HOURS,
   SOURCE_SYNC_JOB,
   SOURCE_SYNC_SINGLETON_MINUTES,
@@ -73,6 +72,20 @@ export function sourceRoutes(deps: AppBindings) {
   });
 
   routes.post('/:id/sync', requireScope('sources:write'), async (c) => {
+    const rawBody = await c.req.text();
+    let body: unknown = {};
+    if (rawBody.trim()) {
+      try {
+        body = JSON.parse(rawBody) as unknown;
+      } catch {
+        throw GatewayError.validation('Invalid JSON body');
+      }
+    }
+    const parsed = syncSourceSchema.safeParse(body);
+    if (!parsed.success) {
+      throw GatewayError.validation('Invalid source sync payload', parsed.error.flatten());
+    }
+
     const db = c.get('db');
     const workspaceId = c.get('workspaceId');
     const sourceId = sourceIdParam(c.req.param('id'));
@@ -89,6 +102,7 @@ export function sourceRoutes(deps: AppBindings) {
         sourceId: source.id,
         workspaceId,
         fullSync: source.type === 'shopify' ? false : true,
+        indexAfterSync: parsed.data.indexAfterSync,
       },
       {
         singletonKey: `source-sync:${source.id}`,
@@ -97,7 +111,18 @@ export function sourceRoutes(deps: AppBindings) {
       },
     );
 
-    return c.json({ jobId, status: 'queued' }, 202);
+    if (!jobId) {
+      throw GatewayError.conflict('A source sync is already queued or running');
+    }
+
+    return c.json(
+      {
+        jobId,
+        status: 'queued',
+        indexAfterSync: parsed.data.indexAfterSync,
+      },
+      202,
+    );
   });
 
   routes.post('/:id/upload', requireScope('sources:write'), async (c) => {
@@ -155,7 +180,9 @@ export function sourceRoutes(deps: AppBindings) {
     if (!mapping) return c.json(profile);
 
     const sensitiveColumns = new Set<string>();
-    const document = mapping.document as { entities?: Array<{ fields?: Array<{ sourceColumn?: string; sensitive?: boolean }> }> };
+    const document = mapping.document as {
+      entities?: Array<{ fields?: Array<{ sourceColumn?: string; sensitive?: boolean }> }>;
+    };
     for (const entity of document.entities ?? []) {
       for (const field of entity.fields ?? []) {
         if (field.sensitive && field.sourceColumn) sensitiveColumns.add(field.sourceColumn);
@@ -173,56 +200,41 @@ export function sourceRoutes(deps: AppBindings) {
     return c.json(redactedProfile);
   });
 
-  routes.get(
-    '/:id/retrieval-policies',
-    requireScope('retrieval:read'),
-    async (c) => {
-      const db = c.get('db');
-      const workspaceId = c.get('workspaceId');
-      const sourceId = sourceIdParam(c.req.param('id'));
-      const policies = await listRetrievalPolicies(db, workspaceId, sourceId);
-      return c.json(policies.map(serializeRetrievalPolicy));
-    },
-  );
+  routes.get('/:id/retrieval-policies', requireScope('retrieval:read'), async (c) => {
+    const db = c.get('db');
+    const workspaceId = c.get('workspaceId');
+    const sourceId = sourceIdParam(c.req.param('id'));
+    const policies = await listRetrievalPolicies(db, workspaceId, sourceId);
+    return c.json(policies.map(serializeRetrievalPolicy));
+  });
 
-  routes.get(
-    '/:id/retrieval-policies/active',
-    requireScope('retrieval:read'),
-    async (c) => {
-      const db = c.get('db');
-      const workspaceId = c.get('workspaceId');
-      const sourceId = sourceIdParam(c.req.param('id'));
-      const policy = await getActiveRetrievalPolicy(db, workspaceId, sourceId);
-      return c.json({ policy: policy ? serializeRetrievalPolicy(policy) : null });
-    },
-  );
+  routes.get('/:id/retrieval-policies/active', requireScope('retrieval:read'), async (c) => {
+    const db = c.get('db');
+    const workspaceId = c.get('workspaceId');
+    const sourceId = sourceIdParam(c.req.param('id'));
+    const policy = await getActiveRetrievalPolicy(db, workspaceId, sourceId);
+    return c.json({ policy: policy ? serializeRetrievalPolicy(policy) : null });
+  });
 
-  routes.post(
-    '/:id/retrieval-policies',
-    requireScope('retrieval:write'),
-    async (c) => {
-      const body: unknown = await c.req.json();
-      const parsed = createRetrievalPolicySchema.safeParse(body);
-      if (!parsed.success) {
-        throw GatewayError.validation(
-          'Invalid retrieval policy payload',
-          parsed.error.flatten(),
-        );
-      }
+  routes.post('/:id/retrieval-policies', requireScope('retrieval:write'), async (c) => {
+    const body: unknown = await c.req.json();
+    const parsed = createRetrievalPolicySchema.safeParse(body);
+    if (!parsed.success) {
+      throw GatewayError.validation('Invalid retrieval policy payload', parsed.error.flatten());
+    }
 
-      const db = c.get('db');
-      const workspaceId = c.get('workspaceId');
-      const sourceId = sourceIdParam(c.req.param('id'));
-      const created = await createRetrievalPolicyDraft(
-        db,
-        workspaceId,
-        sourceId,
-        parsed.data,
-        c.get('apiKeyId'),
-      );
-      return c.json(serializeRetrievalPolicy(created), 201);
-    },
-  );
+    const db = c.get('db');
+    const workspaceId = c.get('workspaceId');
+    const sourceId = sourceIdParam(c.req.param('id'));
+    const created = await createRetrievalPolicyDraft(
+      db,
+      workspaceId,
+      sourceId,
+      parsed.data,
+      c.get('apiKeyId'),
+    );
+    return c.json(serializeRetrievalPolicy(created), 201);
+  });
 
   routes.post(
     '/:id/retrieval-policies/:version/eval',
@@ -232,12 +244,7 @@ export function sourceRoutes(deps: AppBindings) {
       const workspaceId = c.get('workspaceId');
       const sourceId = sourceIdParam(c.req.param('id'));
       const version = policyVersionParam(c.req.param('version'));
-      const policy = await getRetrievalPolicyByVersion(
-        db,
-        workspaceId,
-        sourceId,
-        version,
-      );
+      const policy = await getRetrievalPolicyByVersion(db, workspaceId, sourceId, version);
       const evalSet = await getApplicableEvalSet(db, workspaceId, sourceId);
       if (!evalSet || evalSet.sourceId !== sourceId) {
         throw GatewayError.conflict(
@@ -328,7 +335,7 @@ export function sourceRoutes(deps: AppBindings) {
     await getSourceForWorkspace(db, workspaceId, sourceId);
     await getActiveMapping(db, sourceId);
 
-    const jobId = await enqueueJob(deps.env.DATABASE_URL, SOURCE_INDEX_JOB, {
+    const jobId = await enqueueSourceIndexJob(deps.env.DATABASE_URL, {
       sourceId,
       workspaceId,
     });
@@ -354,35 +361,30 @@ export function sourceRoutes(deps: AppBindings) {
     const workspaceId = c.get('workspaceId');
     const sourceId = sourceIdParam(c.req.param('id'));
     await getSourceForWorkspace(db, workspaceId, sourceId);
+    const activeMapping = await getActiveMapping(db, sourceId);
 
-    const status = await getSourceStatus(db, sourceId);
-
-    const [rawCount] = await db
-      .select({ count: count() })
-      .from(sourceRecordsRaw)
-      .where(eq(sourceRecordsRaw.sourceId, sourceId));
-    const [recordCount] = await db
-      .select({ count: count() })
-      .from(records)
-      .where(eq(records.sourceId, sourceId));
-    const [embeddingCount] = await db
-      .select({ count: count() })
-      .from(recordEmbeddings)
-      .innerJoin(records, eq(recordEmbeddings.recordId, records.id))
-      .innerJoin(
-        mappings,
-        and(
-          eq(mappings.sourceId, records.sourceId),
-          eq(mappings.status, 'active'),
-          eq(recordEmbeddings.mappingVersion, mappings.version),
+    const [status, recordCountRows, embeddingCountRows] = await Promise.all([
+      getSourceStatus(db, sourceId),
+      db.select({ count: count() }).from(records).where(eq(records.sourceId, sourceId)),
+      db
+        .select({ count: count() })
+        .from(recordEmbeddings)
+        .innerJoin(records, eq(recordEmbeddings.recordId, records.id))
+        .where(
+          and(
+            eq(records.sourceId, sourceId),
+            eq(recordEmbeddings.mappingVersion, activeMapping.version),
+            eq(recordEmbeddings.embeddingModel, deps.embeddingProvider.model),
+          ),
         ),
-      )
-      .where(eq(records.sourceId, sourceId));
+    ]);
+    const [recordCount] = recordCountRows;
+    const [embeddingCount] = embeddingCountRows;
 
     return c.json({
       ...status,
       counts: {
-        raw: rawCount?.count ?? 0,
+        raw: status.rawRecords,
         records: recordCount?.count ?? 0,
         embeddings: embeddingCount?.count ?? 0,
       },

@@ -17,8 +17,9 @@ export function createEmbeddingProvider(env: WorkerEnv): EmbeddingProvider {
     apiKey: env.OPENROUTER_API_KEY,
     model: env.EMBEDDING_MODEL,
     dimensions: env.EMBEDDING_DIMENSIONS,
-    softDeadlineMs: env.EMBEDDING_SOFT_DEADLINE_MS,
-    hardTimeoutMs: env.EMBEDDING_HARD_TIMEOUT_MS,
+    softDeadlineMs: env.INGEST_EMBEDDING_SOFT_DEADLINE_MS,
+    hardTimeoutMs: env.INGEST_EMBEDDING_HARD_TIMEOUT_MS,
+    maxRetries: env.INGEST_EMBEDDING_MAX_RETRIES,
     circuitFailureThreshold: env.EMBEDDING_CIRCUIT_FAILURE_THRESHOLD,
     circuitRecoveryMs: env.EMBEDDING_CIRCUIT_RECOVERY_MS,
   });

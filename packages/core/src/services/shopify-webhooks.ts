@@ -3,8 +3,8 @@ import type { Database } from '../db/client.js';
 import type { ShopifyClient } from '../connectors/shopify/types.js';
 import { parseShopifyGid } from '../connectors/shopify/gid.js';
 import { GatewayError } from '../errors/gateway-error.js';
-import { enqueueJob } from '../queue/boss.js';
-import { SOURCE_INDEX_JOB, type ShopifyWebhookJobData } from '../queue/jobs.js';
+import { enqueueSourceIndexJob } from '../queue/boss.js';
+import { type ShopifyWebhookJobData } from '../queue/jobs.js';
 import { sourceRecordsRaw, sources } from '../db/schema/index.js';
 import { getDecryptedSourceConfig } from './sources.js';
 import { findShopifySourceByDomain, upsertShopifyProduct } from './shopify-sync.js';
@@ -56,7 +56,7 @@ export async function processShopifyWebhook(
     }
 
     if (changed) {
-      await enqueueJob(connectionString, SOURCE_INDEX_JOB, {
+      await enqueueSourceIndexJob(connectionString, {
         sourceId: data.sourceId,
         workspaceId: data.workspaceId,
         invalidateMaturity: false,

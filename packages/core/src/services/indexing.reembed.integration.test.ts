@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import {
   generateEmbeddingsForRecords,
   indexSource,
   mappings,
   MockEmbeddingProvider,
   MockLlmProvider,
+  purgeStaleEmbeddingsForSourceVersion,
   recordEmbeddings,
   records,
   sourceRecordsRaw,
@@ -92,10 +93,17 @@ describe.runIf(hasDatabase)('indexing re-embed integration', () => {
         override readonly model = 'mock-embedding-b';
       })(1024);
 
-      const result = await indexSource(db, source.id, workspace.id, testUrl, new MockLlmProvider(), {
-        embeddingModel: providerB.model,
-        invalidateMaturity: false,
-      });
+      const result = await indexSource(
+        db,
+        source.id,
+        workspace.id,
+        testUrl,
+        new MockLlmProvider(),
+        {
+          embeddingModel: providerB.model,
+          invalidateMaturity: false,
+        },
+      );
       expect(result.embeddingJobs).toBeGreaterThan(0);
 
       await generateEmbeddingsForRecords(
@@ -112,13 +120,18 @@ describe.runIf(hasDatabase)('indexing re-embed integration', () => {
         .select()
         .from(recordEmbeddings)
         .innerJoin(records, eq(records.id, recordEmbeddings.recordId))
-        .where(and(eq(records.sourceId, source.id), eq(recordEmbeddings.embeddingModel, providerB.model)));
+        .where(
+          and(
+            eq(records.sourceId, source.id),
+            eq(recordEmbeddings.embeddingModel, providerB.model),
+          ),
+        );
 
       expect(embeddings.length).toBeGreaterThan(0);
     });
   });
 
-  it('purges stale mapping-version embeddings after writing active embeddings', async () => {
+  it('defers stale embedding purge until the source-version queue drains', async () => {
     await withTestDatabase(async (db, testUrl) => {
       const [workspace] = await db
         .insert(workspaces)
@@ -182,6 +195,29 @@ describe.runIf(hasDatabase)('indexing re-embed integration', () => {
       });
       await generateEmbeddingsForRecords(db, source.id, [record.id], 2, provider);
 
+      const deferred = await purgeStaleEmbeddingsForSourceVersion(db, {
+        sourceId: source.id,
+        workspaceId: workspace.id,
+        mappingVersion: 2,
+        embeddingModel: provider.model,
+      });
+      expect(deferred).toEqual({ pending: true, deleted: 0 });
+
+      await db.execute(sql`
+        UPDATE pgboss.job
+        SET state = 'completed', completed_on = now()
+        WHERE name = 'embeddings.generate'
+          AND data->>'sourceId' = ${source.id}
+      `);
+
+      const purged = await purgeStaleEmbeddingsForSourceVersion(db, {
+        sourceId: source.id,
+        workspaceId: workspace.id,
+        mappingVersion: 2,
+        embeddingModel: provider.model,
+      });
+      expect(purged).toEqual({ pending: false, deleted: 1 });
+
       const embeddings = await db
         .select({
           mappingVersion: recordEmbeddings.mappingVersion,
@@ -190,6 +226,85 @@ describe.runIf(hasDatabase)('indexing re-embed integration', () => {
         .where(eq(recordEmbeddings.recordId, record.id));
 
       expect(embeddings).toEqual([{ mappingVersion: 2 }]);
+    });
+  });
+
+  it('chunks provider calls and bulk-writes a large embedding job', async () => {
+    await withTestDatabase(async (db) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({
+          name: 'Embedding batches',
+          slug: `embedding-batches-${Date.now()}`,
+          settings: {},
+        })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      const [source] = await db
+        .insert(sources)
+        .values({
+          workspaceId: workspace.id,
+          type: 'csv',
+          name: 'Embedding batch source',
+          config: {},
+          maturityStatus: 'mapped',
+        })
+        .returning();
+      if (!source) throw new Error('source missing');
+
+      await db.insert(mappings).values({
+        sourceId: source.id,
+        version: 1,
+        document: mappingDocument,
+        status: 'active',
+      });
+
+      const inserted = await db
+        .insert(records)
+        .values(
+          Array.from({ length: 121 }, (_, index) => ({
+            workspaceId: workspace.id,
+            sourceId: source.id,
+            entity: 'product',
+            externalId: `batch-${String(index)}`,
+            data: { sku: `SKU-${String(index)}` },
+            mappingVersion: 1,
+            searchSource: `SKU-${String(index)}`,
+          })),
+        )
+        .returning({ id: records.id });
+
+      const provider = new (class extends MockEmbeddingProvider {
+        readonly batches: number[] = [];
+        inFlight = 0;
+        maxInFlight = 0;
+
+        override async embed(texts: string[]): Promise<number[][]> {
+          this.batches.push(texts.length);
+          this.inFlight += 1;
+          this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          try {
+            return await super.embed(texts);
+          } finally {
+            this.inFlight -= 1;
+          }
+        }
+      })(1024);
+
+      const written = await generateEmbeddingsForRecords(
+        db,
+        source.id,
+        inserted.map((row) => row.id),
+        1,
+        provider,
+        { providerConcurrency: 2 },
+      );
+
+      expect(written).toBe(121);
+      expect(provider.batches).toEqual([50, 50, 21]);
+      expect(provider.maxInFlight).toBe(2);
     });
   });
 });

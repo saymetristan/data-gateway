@@ -1,15 +1,9 @@
 import type PgBoss from 'pg-boss';
-import {
-  createDbFromPool,
-  createPool,
-  runEvalSet,
-  EVALS_RUN_JOB,
-  type EvalsRunJobData,
-} from '@data-gateway/core';
+import { type Database, runEvalSet, EVALS_RUN_JOB, type EvalsRunJobData } from '@data-gateway/core';
 import type { WorkerEnv } from '../env.js';
 import { createEmbeddingProvider, createLlmProvider } from '../providers.js';
 
-export function registerEvalJobs(boss: PgBoss, env: WorkerEnv): void {
+export function registerEvalJobs(boss: PgBoss, env: WorkerEnv, db: Database): void {
   const embeddingProvider = createEmbeddingProvider(env);
   const llmProvider = createLlmProvider(env);
 
@@ -18,12 +12,6 @@ export function registerEvalJobs(boss: PgBoss, env: WorkerEnv): void {
     if (!job) return;
 
     const data = job.data as EvalsRunJobData;
-    const pool = createPool(env.DATABASE_URL);
-    const db = createDbFromPool(pool);
-    try {
-      await runEvalSet(db, data.evalRunId, data.workspaceId, embeddingProvider, llmProvider);
-    } finally {
-      await pool.end();
-    }
+    await runEvalSet(db, data.evalRunId, data.workspaceId, embeddingProvider, llmProvider);
   });
 }

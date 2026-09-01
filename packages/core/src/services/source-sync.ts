@@ -14,7 +14,12 @@ export async function syncSource(
   workspaceId: string,
   encryptionKey: string,
   connectionString: string,
-  options: { fullSync?: boolean; useMockProviders?: boolean; client?: ShopifyClient } = {},
+  options: {
+    fullSync?: boolean;
+    indexAfterSync?: boolean;
+    useMockProviders?: boolean;
+    client?: ShopifyClient;
+  } = {},
 ): Promise<{ synced: number; tables?: string[] }> {
   const [source] = await db
     .select()
@@ -27,14 +32,10 @@ export async function syncSource(
   }
 
   if (source.type === 'database_url') {
-    return syncDatabaseSource(
-      db,
-      sourceId,
-      workspaceId,
-      encryptionKey,
-      connectionString,
-      options.fullSync === undefined ? {} : { fullSync: options.fullSync },
-    );
+    return syncDatabaseSource(db, sourceId, workspaceId, encryptionKey, connectionString, {
+      ...(options.fullSync === undefined ? {} : { fullSync: options.fullSync }),
+      ...(options.indexAfterSync === undefined ? {} : { indexAfterSync: options.indexAfterSync }),
+    });
   }
 
   if (source.type === 'shopify') {
@@ -46,9 +47,7 @@ export async function syncSource(
           shopDomain: String(config.shopDomain),
           ...(typeof config.accessToken === 'string' ? { accessToken: config.accessToken } : {}),
           ...(typeof config.clientId === 'string' ? { clientId: config.clientId } : {}),
-          ...(typeof config.clientSecret === 'string'
-            ? { clientSecret: config.clientSecret }
-            : {}),
+          ...(typeof config.clientSecret === 'string' ? { clientSecret: config.clientSecret } : {}),
           ...(typeof config.apiVersion === 'string' ? { apiVersion: config.apiVersion } : {}),
         },
         options.useMockProviders ?? false,
@@ -61,7 +60,10 @@ export async function syncSource(
       encryptionKey,
       connectionString,
       client,
-      options.fullSync === undefined ? {} : { fullSync: options.fullSync },
+      {
+        ...(options.fullSync === undefined ? {} : { fullSync: options.fullSync }),
+        ...(options.indexAfterSync === undefined ? {} : { indexAfterSync: options.indexAfterSync }),
+      },
     );
     return result;
   }

@@ -4,6 +4,7 @@ import { OpenRouterEmbeddingProvider } from './embeddings.js';
 
 describe('OpenRouterEmbeddingProvider resilience', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     resetCircuitBreakers();
   });
@@ -67,6 +68,35 @@ describe('OpenRouterEmbeddingProvider resilience', () => {
 
     await expect(provider.embed(['lino'])).resolves.toEqual([[0.1, 0.2, 0.3]]);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('honors Retry-After before retrying a throttled request', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '1' } }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new OpenRouterEmbeddingProvider({
+      apiKey: 'test-key',
+      model: 'test-model-retry-after',
+      dimensions: 3,
+      hardTimeoutMs: 5_000,
+      maxRetries: 1,
+    });
+
+    const result = provider.embed(['lino']);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toEqual([[0.1, 0.2, 0.3]]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 
   it('opens circuit after consecutive failures and skips remote calls', async () => {

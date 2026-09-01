@@ -1,19 +1,26 @@
 import PgBoss from 'pg-boss';
-import { ALL_JOB_QUEUES } from '@data-gateway/core';
+import { ALL_JOB_QUEUES, bindQueue, createDbFromPool, createPool } from '@data-gateway/core';
 import { loadWorkerEnv } from './env.js';
 import { registerJobs, scheduleJobs } from './jobs/index.js';
+import { queueOptions } from './queue-config.js';
 
 const env = loadWorkerEnv();
 
 const boss = new PgBoss({
   connectionString: env.DATABASE_URL,
   schema: 'pgboss',
-  // Supabase session pooler: 15 conexiones totales entre api y worker.
-  max: 5,
+  // Supabase session pooler: 15 total connections across API and worker.
+  max: env.WORKER_PGBOSS_POOL_MAX,
   // Archive was ballooning (~547MB); keep history short.
   archiveCompletedAfterSeconds: 3_600,
   deleteAfterDays: 2,
 });
+const workerPool = createPool(env.DATABASE_URL, {
+  max: env.INGEST_DATABASE_POOL_MAX,
+  connectionTimeoutMs: env.INGEST_DATABASE_CONNECTION_TIMEOUT_MS,
+  statementTimeoutMs: env.INGEST_DATABASE_STATEMENT_TIMEOUT_MS,
+});
+const db = createDbFromPool(workerPool);
 
 let shuttingDown = false;
 
@@ -23,12 +30,19 @@ async function start(): Promise<void> {
   });
 
   await boss.start();
+  bindQueue(boss);
   for (const queue of ALL_JOB_QUEUES) {
-    await boss.createQueue(queue);
+    const options = queueOptions(queue);
+    await boss.createQueue(queue, options);
+    if (options) {
+      await boss.updateQueue(queue, options);
+    }
   }
-  registerJobs(boss, env);
-  await scheduleJobs(boss);
-  console.log('Worker started (pg-boss schema: pgboss)');
+  registerJobs(boss, env, db);
+  await scheduleJobs(boss, env, db);
+  console.log(
+    `Worker started (rollout=drain-v1, pg-boss schema: pgboss, ingestion=${env.WORKER_INGESTION_PAUSED ? 'paused' : 'active'}, embedding-jobs=${String(env.EMBEDDING_JOB_CONCURRENCY)}, provider-concurrency=${String(env.EMBEDDING_PROVIDER_CONCURRENCY)}, db-pool=${String(env.INGEST_DATABASE_POOL_MAX)}, boss-pool=${String(env.WORKER_PGBOSS_POOL_MAX)})`,
+  );
 }
 
 async function shutdown(signal: string): Promise<void> {
@@ -36,6 +50,7 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true;
   console.log(`Received ${signal}, shutting down worker...`);
   await boss.stop({ graceful: true, timeout: 10_000 });
+  await workerPool.end();
   process.exit(0);
 }
 

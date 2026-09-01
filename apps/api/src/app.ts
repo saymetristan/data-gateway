@@ -1,8 +1,14 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { timeout } from 'hono/timeout';
+import { sql } from 'drizzle-orm';
 import type { Database, EmbeddingProvider, LlmProvider } from '@data-gateway/core';
-import { GatewayError, gatewayErrorToHttp, pingDb } from '@data-gateway/core';
+import {
+  GatewayError,
+  gatewayErrorToHttp,
+  getPoolStats,
+  pingDb,
+} from '@data-gateway/core';
 import type { ApiEnv } from './env.js';
 import { requestLogger } from './middleware/common.js';
 import { adminAuth, workspaceAuth } from './middleware/auth.js';
@@ -126,4 +132,46 @@ export async function checkHealth(db: Database): Promise<{ status: string; db: s
     status: ok ? 'ok' : 'degraded',
     db: ok ? 'connected' : 'disconnected',
   };
+}
+
+export type Readiness = {
+  status: 'ready' | 'degraded';
+  db: 'connected' | 'disconnected';
+  worker: 'ready' | 'stale';
+  pool: {
+    total: number;
+    idle: number;
+    waiting: number;
+  } | null;
+};
+
+export async function checkReadiness(db: Database): Promise<Readiness> {
+  const pool = getPoolStats();
+  try {
+    const result = await db.execute<{ worker_ready: boolean }>(sql`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pgboss.job
+        WHERE name = 'health.heartbeat'
+          AND state = 'completed'
+          AND completed_on > now() - interval '2 minutes'
+        LIMIT 1
+      ) AS worker_ready
+    `);
+    const workerReady = result.rows[0]?.worker_ready === true;
+    const poolReady = pool !== null && pool.waiting === 0 && (pool.idle > 0 || pool.total === 0);
+    return {
+      status: workerReady && poolReady ? 'ready' : 'degraded',
+      db: 'connected',
+      worker: workerReady ? 'ready' : 'stale',
+      pool,
+    };
+  } catch {
+    return {
+      status: 'degraded',
+      db: 'disconnected',
+      worker: 'stale',
+      pool,
+    };
+  }
 }

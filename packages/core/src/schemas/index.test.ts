@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createWorkspaceSchema, createSourceSchema } from '../schemas/index.js';
+import { createWorkspaceSchema, createSourceSchema, syncSourceSchema } from '../schemas/index.js';
 import { createMappingSchema } from './mapping.js';
 
 describe('schemas', () => {
@@ -53,6 +53,16 @@ describe('schemas', () => {
       },
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it('defaults sync to indexing and supports profile-only sync', () => {
+    expect(syncSourceSchema.parse({})).toEqual({ indexAfterSync: true });
+    expect(syncSourceSchema.parse({ indexAfterSync: false })).toEqual({
+      indexAfterSync: false,
+    });
+    expect(syncSourceSchema.safeParse({ indexAfterSync: false, unknown: true }).success).toBe(
+      false,
+    );
   });
 
   it('rejects sensitive searchable or filterable mapping fields', () => {

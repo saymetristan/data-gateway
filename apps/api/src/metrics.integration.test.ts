@@ -80,10 +80,18 @@ describe.runIf(hasDatabase)('metrics API integration', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       query: { total: number; latencyMsP50: number | null };
+      embeddingIngestion: {
+        pendingJobs: number;
+        pendingRecords: number;
+        completedRecords60m: number;
+      };
       sync: { sourcesByMaturity: Array<{ maturityStatus: string }> };
     };
     expect(body.query.total).toBeGreaterThanOrEqual(1);
     expect(body.query.latencyMsP50).not.toBeNull();
+    expect(body.embeddingIngestion.pendingJobs).toBeGreaterThanOrEqual(0);
+    expect(body.embeddingIngestion.pendingRecords).toBeGreaterThanOrEqual(0);
+    expect(body.embeddingIngestion.completedRecords60m).toBeGreaterThanOrEqual(0);
     expect(body.sync.sourcesByMaturity.length).toBeGreaterThanOrEqual(0);
   });
 });

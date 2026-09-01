@@ -10,8 +10,8 @@ import {
   variantToRawPayload,
 } from '../connectors/shopify/transform.js';
 import { GatewayError } from '../errors/gateway-error.js';
-import { enqueueJob } from '../queue/boss.js';
-import { SOURCE_INDEX_JOB, SOURCE_PROFILE_JOB } from '../queue/jobs.js';
+import { enqueueJob, enqueueSourceIndexJob } from '../queue/boss.js';
+import { SOURCE_PROFILE_JOB } from '../queue/jobs.js';
 import { getDecryptedSourceConfig, updateSourceConfig } from './sources.js';
 import {
   deleteRawRecords,
@@ -37,7 +37,7 @@ export async function syncShopifySource(
   encryptionKey: string,
   connectionString: string,
   client: ShopifyClient,
-  options: { fullSync?: boolean } = {},
+  options: { fullSync?: boolean; indexAfterSync?: boolean } = {},
 ): Promise<{ synced: number }> {
   const [source] = await db
     .select()
@@ -102,13 +102,25 @@ export async function syncShopifySource(
     }
 
     const lastSyncedAt = syncStartedAt.toISOString();
-    await updateSourceConfig(db, sourceId, workspaceId, { syncState: { lastSyncedAt } }, encryptionKey);
+    await updateSourceConfig(
+      db,
+      sourceId,
+      workspaceId,
+      { syncState: { lastSyncedAt } },
+      encryptionKey,
+    );
     await db
       .update(sources)
       .set({ lastSyncedAt: new Date(), updatedAt: new Date() })
       .where(eq(sources.id, sourceId));
 
-    await enqueuePostSyncJob(db, sourceId, workspaceId, connectionString);
+    await enqueuePostSyncJob(
+      db,
+      sourceId,
+      workspaceId,
+      connectionString,
+      options.indexAfterSync ?? true,
+    );
 
     return { synced };
   } finally {
@@ -184,7 +196,13 @@ async function enqueuePostSyncJob(
   sourceId: string,
   workspaceId: string,
   connectionString: string,
+  indexAfterSync: boolean,
 ): Promise<void> {
+  if (!indexAfterSync) {
+    await enqueueJob(connectionString, SOURCE_PROFILE_JOB, { sourceId, workspaceId });
+    return;
+  }
+
   const [activeMapping] = await db
     .select({ id: mappings.id })
     .from(mappings)
@@ -193,7 +211,7 @@ async function enqueuePostSyncJob(
     .limit(1);
 
   if (activeMapping) {
-    await enqueueJob(connectionString, SOURCE_INDEX_JOB, {
+    await enqueueSourceIndexJob(connectionString, {
       sourceId,
       workspaceId,
       invalidateMaturity: false,
@@ -221,9 +239,8 @@ export async function findShopifySourceByDomain(
 
   for (const row of rows) {
     const config = row.config as Record<string, unknown>;
-    const domain = typeof config.shopDomain === 'string'
-      ? normalizeShopifyDomain(config.shopDomain)
-      : '';
+    const domain =
+      typeof config.shopDomain === 'string' ? normalizeShopifyDomain(config.shopDomain) : '';
     if (domain === normalized) {
       return row;
     }

@@ -391,7 +391,7 @@ entities:
   product:
     table: products
     primary_key: id
-    description: "Productos vendibles al cliente final"
+    description: 'Productos vendibles al cliente final'
 
     fields:
       name:
@@ -1499,7 +1499,17 @@ POST /sources
 
 ```http
 POST /sources/:id/sync
+Content-Type: application/json
+
+{
+  "indexAfterSync": true
+}
 ```
+
+`indexAfterSync` es opcional y por defecto vale `true`. Usa `false` para
+actualizar `source_records_raw` y regenerar el perfil sin modificar los records,
+embeddings ni mapping activos. Si ya existe un sync en cola o ejecutándose, el
+endpoint responde `409` porque no puede garantizar el modo solicitado.
 
 ### obtener perfil de schema
 
