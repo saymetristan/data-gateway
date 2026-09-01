@@ -43,6 +43,7 @@ import {
   lexicalRowsToHits,
   lexicalSearch,
   vectorSearchForSource,
+  type IdentifierTarget,
   type RawRecordRow,
   type RetrievalHit,
 } from '../query/retrieval.js';
@@ -55,7 +56,7 @@ import {
 import { shapeAppliedFilters, shapeRecordData } from '../query/shaping.js';
 import { expandSynonymBranches } from '../query/synonyms.js';
 import { getFieldRetrieval } from '../schemas/mapping.js';
-import { getFilterableTargets } from '../mapping/metadata.js';
+import { getFilterableTargets, pickIdentifierField } from '../mapping/metadata.js';
 import {
   buildQueryEmbeddingCacheHash,
   getSharedQueryEmbeddingCache,
@@ -156,6 +157,7 @@ type PreparedQuery = {
   lexicalWeight: number;
   vectorWeight: number;
   embeddingsAvailableBySource: Map<string, boolean>;
+  identifierTargets: IdentifierTarget[];
   warnings: string[];
   queryPlan: QueryPlan;
 };
@@ -393,6 +395,7 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
         limit: input.request.limit,
         synonymDictionary: dictionary,
         lexicalBranches,
+        identifierTargets: prepared.identifierTargets,
       }),
     ).then((rows) => {
       metadata.timings.lexicalMs = Date.now() - parallelStarted;
@@ -532,6 +535,7 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
             limit: input.request.limit,
             synonymDictionary: dictionary,
             lexicalBranches: relaxedLexicalBranches,
+            identifierTargets: prepared.identifierTargets,
           }),
           runVector(relaxed.filters),
         ]);
@@ -1244,6 +1248,7 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     input.embeddingProvider.model,
     mappingVersionBySource,
   );
+  const identifierTargets = collectIdentifierTargets(queryable, entityFilter);
 
   return {
     queryable,
@@ -1270,6 +1275,7 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     ),
     lexicalWeight: rrf.lexicalWeight,
     vectorWeight: rrf.vectorWeight,
+    identifierTargets,
     embeddingsAvailableBySource,
     warnings,
     queryPlan: {
@@ -1570,6 +1576,25 @@ function collectAllFields(
     }
   }
   return fields;
+}
+
+function collectIdentifierTargets(
+  queryable: QueryableSource[],
+  entity?: string,
+): IdentifierTarget[] {
+  const targets: IdentifierTarget[] = [];
+  for (const source of queryable) {
+    for (const entityDef of pickEntities(source.document, entity)) {
+      const field = pickIdentifierField(entityDef);
+      if (!field) continue;
+      targets.push({
+        sourceId: source.id,
+        entity: entityDef.entity,
+        field: field.name,
+      });
+    }
+  }
+  return targets;
 }
 
 function buildFieldMap(queryable: QueryableSource[]): Map<string, MappingField[]> {

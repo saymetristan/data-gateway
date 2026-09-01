@@ -6,7 +6,11 @@ import {
   buildLexicalBranches,
   type LexicalBranch,
 } from './lexical-branches.js';
-import { isShortSkuLikeQuery } from './text-utils.js';
+import {
+  extractExplicitIdentifier,
+  isShortSkuLikeQuery,
+  normalizeIdentifier,
+} from './text-utils.js';
 import { reciprocalRankFusion } from './rrf.js';
 
 const LEXICAL_CANDIDATE_LIMIT = 50;
@@ -60,6 +64,8 @@ export type HybridSearchInput = {
   synonymDictionary?: Record<string, string[]>;
   /** Optional precomputed lexical branches (parallel path). */
   lexicalBranches?: LexicalBranch[];
+  /** Mapping-derived identifier fields eligible for deterministic lookup. */
+  identifierTargets?: IdentifierTarget[];
 };
 
 export type HybridSearchResult = {
@@ -79,6 +85,13 @@ export type RawRecordRow = {
   rank?: number;
   distance?: number;
   lexical_match?: boolean;
+  identifier_match?: boolean;
+};
+
+export type IdentifierTarget = {
+  sourceId: string;
+  entity: string;
+  field: string;
 };
 
 export type RetrievalScope = {
@@ -92,6 +105,7 @@ export type RetrievalScope = {
   limit: number;
   synonymDictionary?: Record<string, string[]>;
   lexicalBranches?: LexicalBranch[];
+  identifierTargets?: IdentifierTarget[];
 };
 
 export async function hybridSearch(input: HybridSearchInput): Promise<HybridSearchResult> {
@@ -178,6 +192,11 @@ export async function hybridSearch(input: HybridSearchInput): Promise<HybridSear
 export async function lexicalSearch(scope: RetrievalScope): Promise<RawRecordRow[]> {
   const queryText = scope.freeText.trim();
   if (!queryText) return [];
+  const identifier = extractExplicitIdentifier(queryText);
+  const identifierRows =
+    identifier && (scope.identifierTargets?.length ?? 0) > 0
+      ? await exactIdentifierSearch(scope, identifier)
+      : [];
 
   const branches =
     scope.lexicalBranches ??
@@ -186,10 +205,74 @@ export async function lexicalSearch(scope: RetrievalScope): Promise<RawRecordRow
 
   // Single short query: keep the direct path (incl. SKU trigram).
   if (limitedBranches.length <= 1) {
-    return lexicalSearchSingle(scope, queryText);
+    const lexicalRows = await lexicalSearchSingle(scope, queryText);
+    return prependIdentifierRows(identifierRows, lexicalRows);
   }
 
-  return lexicalSearchMultiBranch(scope, limitedBranches);
+  const lexicalRows = await lexicalSearchMultiBranch(scope, limitedBranches);
+  return prependIdentifierRows(identifierRows, lexicalRows);
+}
+
+async function exactIdentifierSearch(
+  scope: RetrievalScope,
+  identifier: string,
+): Promise<RawRecordRow[]> {
+  const targets = scope.identifierTargets ?? [];
+  if (targets.length === 0) return [];
+
+  const normalized = normalizeIdentifier(identifier);
+  if (!normalized) return [];
+
+  const targetConditions = targets.map((target) => {
+    const fieldKey = target.field.replace(/'/g, "''");
+    const textPath = sql.raw(`r.data->>'${fieldKey}'`);
+    return sql`(
+      r.source_id = ${target.sourceId}
+      AND r.entity = ${target.entity}
+      AND (
+        lower(public.f_unaccent(coalesce(${textPath}, ''))) =
+          lower(public.f_unaccent(${identifier}))
+        OR regexp_replace(
+          lower(public.f_unaccent(coalesce(${textPath}, ''))),
+          '[^a-z0-9]',
+          '',
+          'g'
+        ) = ${normalized}
+      )
+    )`;
+  });
+
+  const where = buildWhereClause(scope);
+  const result = await scope.db.execute(sql`
+    SELECT
+      r.id,
+      r.entity,
+      r.source_id,
+      r.data,
+      r.search_source,
+      1::double precision AS rank,
+      true AS lexical_match,
+      true AS identifier_match
+    FROM records r
+    WHERE ${where}
+      AND (${sql.join(targetConditions, sql` OR `)})
+    ORDER BY r.updated_at DESC
+    LIMIT ${LEXICAL_CANDIDATE_LIMIT}
+  `);
+
+  return rowsFromResult(result);
+}
+
+function prependIdentifierRows(
+  identifierRows: RawRecordRow[],
+  lexicalRows: RawRecordRow[],
+): RawRecordRow[] {
+  if (identifierRows.length === 0) return lexicalRows;
+  const seen = new Set(identifierRows.map((row) => row.id));
+  return [
+    ...identifierRows,
+    ...lexicalRows.filter((row) => !seen.has(row.id)),
+  ].slice(0, LEXICAL_CANDIDATE_LIMIT);
 }
 
 /**
@@ -462,7 +545,14 @@ function fuseHits(
   }
 
   const hits: RetrievalHit[] = [];
-  for (const item of fused.slice(0, input.limit)) {
+  const identifierIds = lexicalRows
+    .filter((row) => row.identifier_match)
+    .map((row) => row.id);
+  const ordered = [
+    ...identifierIds.map((id) => ({ id, score: 1 })),
+    ...fused.filter((item) => !identifierIds.includes(item.id)),
+  ];
+  for (const item of ordered.slice(0, input.limit)) {
     const row = rowById.get(item.id);
     if (!row) continue;
     hits.push({
@@ -511,6 +601,7 @@ function toScope(input: HybridSearchInput): RetrievalScope {
     limit: input.limit,
     ...(input.synonymDictionary ? { synonymDictionary: input.synonymDictionary } : {}),
     ...(input.lexicalBranches ? { lexicalBranches: input.lexicalBranches } : {}),
+    ...(input.identifierTargets ? { identifierTargets: input.identifierTargets } : {}),
   };
 }
 

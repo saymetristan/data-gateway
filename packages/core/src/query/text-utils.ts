@@ -59,3 +59,35 @@ export function isShortSkuLikeQuery(text: string): boolean {
   if (trimmed.includes(' ')) return false;
   return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(trimmed);
 }
+
+/**
+ * Extract an identifier only when the query explicitly labels it, or when the
+ * complete query is a short code. This deliberately ignores bare numbers in
+ * conversational text so years, prices and measurements keep their meaning.
+ */
+export function extractExplicitIdentifier(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  if (
+    isShortSkuLikeQuery(trimmed) &&
+    /\d/.test(trimmed) &&
+    normalizedIdentifierLength(trimmed) >= 3
+  ) {
+    return trimmed;
+  }
+
+  const match = trimmed.match(
+    /(?:\b(?:sku|c[oó]digo|code|referencia|ref|parte|part(?:\s+number)?|item)\b|p\s*\/\s*n)\s*(?:#|:|=|-)?\s*([a-z0-9][a-z0-9._/-]{1,31})/iu,
+  );
+  const identifier = match?.[1]?.replace(/[.,;:]+$/g, '') ?? '';
+  return normalizedIdentifierLength(identifier) >= 3 ? identifier : null;
+}
+
+export function normalizeIdentifier(value: string): string {
+  return normalizeText(value).replace(/[^a-z0-9]/g, '');
+}
+
+function normalizedIdentifierLength(value: string): number {
+  return normalizeIdentifier(value).length;
+}

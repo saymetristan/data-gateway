@@ -47,7 +47,7 @@ const phase3Mapping: MappingDocument = {
       entity: 'product',
       sourceTable: 'products',
       fields: [
-        { name: 'sku', sourceColumn: 'sku', type: 'string', searchable: true, filterable: true, visible: true, sensitive: false },
+        { name: 'sku', sourceColumn: 'sku', type: 'string', searchable: true, filterable: true, visible: true, sensitive: false, identifier: true },
         { name: 'name', sourceColumn: 'name', type: 'string', searchable: true, filterable: false, visible: true, sensitive: false },
         { name: 'description', sourceColumn: 'description', type: 'string', searchable: true, filterable: false, visible: true, sensitive: false },
         { name: 'price', sourceColumn: 'price', type: 'number', searchable: false, filterable: true, visible: true, sensitive: false },
@@ -194,6 +194,30 @@ describe.runIf(hasFixture)('query integration', () => {
       });
 
       expect(response.results.some((result) => result.data.sku === 'SKU-00042')).toBe(true);
+    });
+  });
+
+  it('prioriza un SKU etiquetado dentro de una frase larga', async () => {
+    await withTestDatabase(async (db, testUrl) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'SKU phrase', slug: `sp-${crypto.randomUUID().slice(0, 8)}`, settings: {} })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+
+      await bootstrapSource(db, testUrl, workspace.id);
+
+      const response = await executeQuery({
+        db,
+        workspaceId: workspace.id,
+        request: {
+          query: 'busco la parte SKU-00042 para una camiseta',
+          limit: 5,
+        },
+        embeddingProvider: new MockEmbeddingProvider(1024),
+      });
+
+      expect(response.results[0]?.data.sku).toBe('SKU-00042');
     });
   });
 
