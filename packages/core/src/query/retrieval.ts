@@ -10,6 +10,7 @@ import {
   extractExplicitIdentifier,
   isShortSkuLikeQuery,
   normalizeIdentifier,
+  normalizeText,
 } from './text-utils.js';
 import { reciprocalRankFusion } from './rrf.js';
 
@@ -373,11 +374,33 @@ export function selectLexicalBranches(branches: LexicalBranch[]): LexicalBranch[
   if (branches.length <= MAX_LEXICAL_BRANCHES) return branches;
 
   const full = branches.filter((branch) => branch.kind === 'full');
-  const rest = branches
-    .filter((branch) => branch.kind !== 'full')
+  const synonymAlts = branches
+    .filter((branch) => branch.kind === 'synonym_alt')
+    .sort(
+      (a, b) =>
+        synonymIdentifierPriority(b.text) - synonymIdentifierPriority(a.text) ||
+        b.weight - a.weight ||
+        a.text.localeCompare(b.text),
+    );
+  const otherBranches = branches
+    .filter(
+      (branch) => branch.kind !== 'full' && branch.kind !== 'synonym_alt',
+    )
     .sort((a, b) => b.weight - a.weight || a.text.localeCompare(b.text));
-  const budget = Math.max(0, MAX_LEXICAL_BRANCHES - full.length);
-  return [...full, ...rest.slice(0, budget)];
+  const available = Math.max(0, MAX_LEXICAL_BRANCHES - full.length);
+  const synonymBudget = Math.min(3, available);
+  const selectedSynonyms = synonymAlts.slice(0, synonymBudget);
+  const otherBudget = available - selectedSynonyms.length;
+  return [...full, ...selectedSynonyms, ...otherBranches.slice(0, otherBudget)];
+}
+
+function synonymIdentifierPriority(text: string): number {
+  const compact = normalizeText(text).replace(/[^a-z0-9]/g, '');
+  if (/^\d+(?:l|lt|lts|litro|litros|t)$/.test(compact)) return 0;
+  if (/[a-z]/.test(compact) && /\d/.test(compact)) return 3;
+  if (/^\d+$/.test(compact)) return 2;
+  if (/\d/.test(compact)) return 1;
+  return 0;
 }
 
 export async function vectorSearchForSource(
