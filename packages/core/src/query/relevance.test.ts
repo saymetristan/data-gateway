@@ -106,9 +106,18 @@ describe('descriptive hit relevance', () => {
       },
       concepts,
     );
+    const twoHundredLiters = score(
+      {
+        item_code: '122746',
+        item_name: 'TAMBOR DE ACEITE MOBIL 15W40 DE 200 LITROS',
+      },
+      concepts,
+    );
 
     expect(nineteenLiters.score).toBeGreaterThan(fiveLiters.score);
     expect(nineteenLiters.score).toBeGreaterThan(superficial.score);
+    expect(twoHundredLiters.constraintConflict).toBe(true);
+    expect(nineteenLiters.score).toBeGreaterThan(twoHundredLiters.score);
   });
 
   it('rechaza evidencia exclusiva de una descripción contaminada', () => {
@@ -124,9 +133,18 @@ describe('descriptive hit relevance', () => {
       },
       concepts,
     );
+    const twoStroke = score(
+      {
+        item_code: 'O00087-001',
+        item_name: 'ACEITE AFOSA 2 TIEMPOS',
+      },
+      concepts,
+    );
 
     expect(contaminated.termCoverage).toBeGreaterThan(0.5);
     expect(contaminated.primaryFieldCoverage).toBe(0);
+    expect(twoStroke.constraintConflict).toBe(true);
+    expect(twoStroke.score).toBeLessThan(contaminated.score);
   });
 
   it('reserva score uno para identificadores exactos', () => {

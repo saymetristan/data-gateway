@@ -22,6 +22,7 @@ export type HitRelevance = {
   termCoverage: number;
   primaryFieldCoverage: number;
   vectorSimilarity?: number;
+  constraintConflict: boolean;
 };
 
 const TOKEN_STOPWORDS = new Set([
@@ -93,6 +94,7 @@ export function computeHitRelevance(input: HitRelevanceInput): HitRelevance {
       score: 1,
       termCoverage: 1,
       primaryFieldCoverage: 1,
+      constraintConflict: false,
     };
   }
 
@@ -128,6 +130,21 @@ export function computeHitRelevance(input: HitRelevanceInput): HitRelevance {
     input.vectorDistance === undefined
       ? undefined
       : clamp01(1 - input.vectorDistance);
+  const queryConstraints = extractQuantifiedConstraints(
+    input.concepts.flatMap((concept) => concept.alternatives).join(' '),
+  );
+  const candidateConstraints = extractQuantifiedConstraints(
+    weightedTexts.map((field) => field.text).join(' '),
+  );
+  const constraintConflict = queryConstraints.some((expected) => {
+    const candidates = candidateConstraints.filter(
+      (candidate) => candidate.family === expected.family,
+    );
+    return (
+      candidates.length > 0 &&
+      candidates.every((candidate) => candidate.value !== expected.value)
+    );
+  });
 
   const weightedSignals: Array<{ value: number; weight: number }> = [
     { value: normalizedRetrieval, weight: 0.35 },
@@ -138,22 +155,47 @@ export function computeHitRelevance(input: HitRelevanceInput): HitRelevance {
     weightedSignals.push({ value: vectorSimilarity, weight: 0.05 });
   }
   const totalWeight = weightedSignals.reduce((sum, signal) => sum + signal.weight, 0);
-  const score =
+  const blendedScore =
     totalWeight === 0
       ? 0
       : weightedSignals.reduce(
           (sum, signal) => sum + signal.value * signal.weight,
           0,
         ) / totalWeight;
+  const score = constraintConflict ? blendedScore * 0.35 : blendedScore;
 
   return {
     score: round4(clamp01(score)),
     termCoverage: round4(termCoverage),
     primaryFieldCoverage: round4(primaryFieldCoverage),
+    constraintConflict,
     ...(vectorSimilarity !== undefined
       ? { vectorSimilarity: round4(vectorSimilarity) }
       : {}),
   };
+}
+
+type QuantifiedConstraint = {
+  family: 'liters' | 'strokes';
+  value: number;
+};
+
+function extractQuantifiedConstraints(text: string): QuantifiedConstraint[] {
+  const normalized = normalizeText(text);
+  const constraints: QuantifiedConstraint[] = [];
+  for (const match of normalized.matchAll(
+    /\b(\d+(?:[.,]\d+)?)\s*(?:l|lt|lts|litro|litros)\b/g,
+  )) {
+    const value = Number(match[1]?.replace(',', '.'));
+    if (Number.isFinite(value)) constraints.push({ family: 'liters', value });
+  }
+  for (const match of normalized.matchAll(
+    /\b([24])\s*(?:t|tiempo|tiempos)\b/g,
+  )) {
+    const value = Number(match[1]);
+    if (Number.isFinite(value)) constraints.push({ family: 'strokes', value });
+  }
+  return constraints;
 }
 
 function coverage(
