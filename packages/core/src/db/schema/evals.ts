@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, uuid, text, jsonb, doublePrecision, timestamp, index, pgEnum, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, jsonb, doublePrecision, integer, timestamp, index, pgEnum, uniqueIndex } from 'drizzle-orm/pg-core';
 import { workspaces } from './workspaces.js';
 import { sources } from './sources.js';
 import { sourceRetrievalPolicies } from './retrieval-policies.js';
@@ -44,6 +44,10 @@ export const evalCases = pgTable(
     mustRankAbove: jsonb('must_rank_above'),
     expectedTopIds: jsonb('expected_top_ids'),
     mustApplyPreferences: jsonb('must_apply_preferences'),
+    mustNotAppearInTop: jsonb('must_not_appear_in_top'),
+    maxResultCount: integer('max_result_count'),
+    maxConfidence: doublePrecision('max_confidence'),
+    mustContainFields: jsonb('must_contain_fields'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('eval_cases_eval_set_id_idx').on(table.evalSetId)],

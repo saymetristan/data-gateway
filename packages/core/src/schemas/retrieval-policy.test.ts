@@ -74,18 +74,24 @@ describe('retrieval policy schema', () => {
               {
                 field: 'collections',
                 aliases: ['linea', 'línea'],
+                valueAliases: { Verano: ['summer'] },
                 implicitBehavior: 'filter',
                 match: 'contains',
                 boost: 0.4,
               },
             ],
             rrf: { lexicalWeight: 1.2, vectorWeight: 1 },
+            quality: {
+              minRelevance: 0.42,
+              minPrimaryFieldCoverage: 0.2,
+            },
           },
         ],
       },
     });
     expect(parsed.document.entities[0]?.fields[0]?.field).toBe('collections');
     expect(parsed.document.entities[0]?.rrf?.lexicalWeight).toBe(1.2);
+    expect(parsed.document.entities[0]?.quality?.minRelevance).toBe(0.42);
   });
 
   it('rejects undeclared nested policy properties', () => {

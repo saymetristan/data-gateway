@@ -145,6 +145,11 @@ describe.runIf(hasFixture)('query integration', () => {
       expect(response.confidence).toBeGreaterThan(0);
       expect(response.results.length).toBeGreaterThan(0);
       expect(response.results[0]?.data.cost).toBeUndefined();
+      for (const result of response.results) {
+        expect(result.score).toBeGreaterThanOrEqual(0);
+        expect(result.score).toBeLessThanOrEqual(1);
+        expect(result.data.sku).toBeDefined();
+      }
     });
   });
 

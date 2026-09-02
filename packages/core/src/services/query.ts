@@ -28,6 +28,10 @@ import {
 } from '../schemas/query.js';
 import { computeConfidence } from '../query/confidence.js';
 import { extractFilters, resolveExtractedMatches } from '../query/extract-filters.js';
+import {
+  buildQueryConcepts,
+  computeHitRelevance,
+} from '../query/relevance.js';
 import { validateStructuredFilters } from '../query/validate-filters.js';
 import {
   computeDistinctiveTermCoverage,
@@ -68,6 +72,7 @@ import {
   getActiveRetrievalPoliciesForSources,
   getRetrievalPolicyById,
   resolveEntityRrf,
+  resolveEntityQuality,
   resolveEntitySynonyms,
   resolveFieldPolicy,
   type ActiveRetrievalPolicy,
@@ -156,6 +161,8 @@ type PreparedQuery = {
   retrievalPolicyVersions: Record<string, number>;
   lexicalWeight: number;
   vectorWeight: number;
+  minRelevance: number;
+  minPrimaryFieldCoverage: number;
   embeddingsAvailableBySource: Map<string, boolean>;
   identifierTargets: IdentifierTarget[];
   warnings: string[];
@@ -866,7 +873,6 @@ async function finalizeResponse(args: {
     appliedPreferences,
     started,
     metadata,
-    distinctiveTerms,
     hadFreeText,
   } = args;
 
@@ -897,28 +903,78 @@ async function finalizeResponse(args: {
   }
 
   const hitById = new Map(enrichedHits.map((hit) => [hit.id, hit]));
-  const rankedHits = rankByPreferenceCoverage(
+  const preferenceRanked = rankByPreferenceCoverage(
     rescored.hits,
     rescored.signalsById,
-  )
-    .slice(0, input.request.limit)
+  );
+  const maxRetrievalScore = Math.max(
+    0,
+    ...preferenceRanked.map((item) => item.score),
+  );
+  const fieldMap = buildFieldMap(prepared.queryable);
+  const concepts = buildQueryConcepts(
+    unresolvedText.trim() || requestQueryText(input.request),
+    prepared.synonymDictionary,
+  );
+  const relevanceById = new Map<
+    string,
+    { score: number; termCoverage: number; primaryFieldCoverage: number }
+  >();
+  const relevanceRanked = preferenceRanked
     .map((item) => {
       const original = hitById.get(item.id);
+      const relevance = hadFreeText
+        ? computeHitRelevance({
+            retrievalScore: item.score,
+            maxRetrievalScore,
+            ...(original?.vectorDistance !== undefined
+              ? { vectorDistance: original.vectorDistance }
+              : {}),
+            ...(original?.exactIdentifier
+              ? { exactIdentifier: true }
+              : {}),
+            data: item.data,
+            fields: fieldMap.get(original?.entity ?? '') ?? [],
+            concepts,
+          })
+        : {
+            score: Number(Math.min(1, Math.max(0, item.score)).toFixed(4)),
+            termCoverage: 1,
+            primaryFieldCoverage: 1,
+          };
+      relevanceById.set(item.id, relevance);
       return {
         id: item.id,
         entity: original?.entity ?? '',
-        score: item.score,
+        score: relevance.score,
         data: item.data,
         lexicalMatch: original?.lexicalMatch ?? false,
+        exactIdentifier: original?.exactIdentifier ?? false,
       };
-    });
+    })
+    .filter((hit) => {
+      if (hit.exactIdentifier) return true;
+      const relevance = relevanceById.get(hit.id);
+      if (!relevance) return false;
+      return (
+        relevance.score >= prepared.minRelevance &&
+        relevance.primaryFieldCoverage >= prepared.minPrimaryFieldCoverage
+      );
+    })
+    .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+  const prunedCount = preferenceRanked.length - relevanceRanked.length;
+  if (prunedCount > 0) {
+    warnings.push(
+      `${String(prunedCount)} low-relevance candidate${prunedCount === 1 ? '' : 's'} omitted`,
+    );
+  }
+  const rankedHits = relevanceRanked.slice(0, input.request.limit);
 
   metadata.rankingSignals = summarizeSignals(
     rescored.signalsById,
     rankedHits.slice(0, 5).map((hit) => hit.id),
   );
 
-  const fieldMap = buildFieldMap(prepared.queryable);
   const shapedResults = rankedHits.map((hit) => ({
     id: hit.id,
     entity: hit.entity,
@@ -927,23 +983,9 @@ async function finalizeResponse(args: {
   }));
 
   const topHit = rankedHits[0];
-  const topSearchText = topHit
-    ? [
-        typeof topHit.data.productTitle === 'string' ? topHit.data.productTitle : '',
-        typeof topHit.data.title === 'string' ? topHit.data.title : '',
-        typeof topHit.data.fabricType === 'string' ? topHit.data.fabricType : '',
-        typeof topHit.data.search_source === 'string' ? topHit.data.search_source : '',
-        Array.isArray(topHit.data.collections)
-          ? topHit.data.collections.filter((value): value is string => typeof value === 'string').join(' ')
-          : '',
-      ]
-        .filter(Boolean)
-        .join(' ')
-    : undefined;
-  const distinctiveTermCoverage = computeDistinctiveTermCoverage(
-    distinctiveTerms,
-    topSearchText,
-  );
+  const distinctiveTermCoverage = topHit
+    ? (relevanceById.get(topHit.id)?.termCoverage ?? 0)
+    : 0;
   const anyLexicalHit = retrievalHits.some((hit) => hit.lexicalMatch);
   const vectorOnlyFallback = hadFreeText && !anyLexicalHit && queryType === 'hybrid_search';
 
@@ -1116,6 +1158,10 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
           query: queryText,
           entity,
           profile: source.profile,
+          fieldValueAliases: collectFieldValueAliases(
+            retrievalPolicies.get(source.id),
+            entity,
+          ),
         });
         extractedMatches.push(...extracted.matches);
         extractWarnings.push(...extracted.warnings);
@@ -1241,6 +1287,11 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     retrievalPolicies,
   );
   const rrf = collectRrfWeights(queryable, entityFilter, retrievalPolicies);
+  const quality = collectQualityThresholds(
+    queryable,
+    entityFilter,
+    retrievalPolicies,
+  );
 
   const embeddingsAvailableBySource = await resolveEmbeddingsAvailability(
     db,
@@ -1275,6 +1326,8 @@ async function prepareQuery(db: Database, input: ExecuteQueryInput): Promise<Pre
     ),
     lexicalWeight: rrf.lexicalWeight,
     vectorWeight: rrf.vectorWeight,
+    minRelevance: quality.minRelevance,
+    minPrimaryFieldCoverage: quality.minPrimaryFieldCoverage,
     identifierTargets,
     embeddingsAvailableBySource,
     warnings,
@@ -1469,6 +1522,41 @@ function collectRrfWeights(
     }
   }
   return { lexicalWeight: 1, vectorWeight: 1.1 };
+}
+
+function collectQualityThresholds(
+  queryable: QueryableSource[],
+  entity?: string,
+  policiesBySource: Map<string, ActiveRetrievalPolicy> = new Map(),
+): { minRelevance: number; minPrimaryFieldCoverage: number } {
+  let minRelevance = 0;
+  let minPrimaryFieldCoverage = 0;
+  for (const source of queryable) {
+    const policy = policiesBySource.get(source.id);
+    for (const entityDef of pickEntities(source.document, entity)) {
+      const quality = resolveEntityQuality(policy, entityDef.entity);
+      minRelevance = Math.max(minRelevance, quality.minRelevance);
+      minPrimaryFieldCoverage = Math.max(
+        minPrimaryFieldCoverage,
+        quality.minPrimaryFieldCoverage,
+      );
+    }
+  }
+  return { minRelevance, minPrimaryFieldCoverage };
+}
+
+function collectFieldValueAliases(
+  policy: ActiveRetrievalPolicy | undefined,
+  entity: MappingEntity,
+): Map<string, Record<string, string[]>> {
+  const aliases = new Map<string, Record<string, string[]>>();
+  for (const field of entity.fields) {
+    const fieldPolicy = resolveFieldPolicy(policy, entity.entity, field.name);
+    if (fieldPolicy && Object.keys(fieldPolicy.valueAliases).length > 0) {
+      aliases.set(field.name, fieldPolicy.valueAliases);
+    }
+  }
+  return aliases;
 }
 
 function collectFilterableFields(

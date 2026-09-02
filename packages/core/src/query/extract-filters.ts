@@ -10,6 +10,7 @@ export type ExtractFiltersInput = {
   query: string;
   entity: MappingEntity;
   profile: SourceProfileDocument;
+  fieldValueAliases?: Map<string, Record<string, string[]>>;
 };
 
 export type ExtractedFieldMatch = {
@@ -92,7 +93,14 @@ export function extractFilters(input: ExtractFiltersInput): ExtractFiltersResult
       const column = field.sourceColumn
         ? profileColumns.get(field.sourceColumn)
         : profileColumns.get(field.name);
-      stringMatches.push(...extractStringFilterMatches(input.query, field, column));
+      stringMatches.push(
+        ...extractStringFilterMatches(
+          input.query,
+          field,
+          column,
+          input.fieldValueAliases?.get(field.name) ?? {},
+        ),
+      );
     }
 
     if (field.type === 'boolean') {
@@ -285,6 +293,7 @@ function extractStringFilterMatches(
   query: string,
   field: FilterableTarget,
   column: ProfileColumn | undefined,
+  valueAliases: Record<string, string[]>,
 ): StringFilterMatch[] {
   const atomic =
     field.retrieval?.cardinality === 'many' && column?.atomicValues
@@ -324,12 +333,16 @@ function extractStringFilterMatches(
       field.name,
       expandedValues,
       op,
+      valueAliases,
     );
     if (explicit) matches.push(explicit);
   }
 
   for (const value of expandedValues) {
-    const valueMatch = findValueMatch(normalizedQuery, value);
+    const valueMatch = findFirstValueMatch(
+      normalizedQuery,
+      [value, ...aliasesForValue(value, valueAliases)],
+    );
     if (!valueMatch) continue;
 
     matches.push({
@@ -351,6 +364,7 @@ function extractExplicitStringMatch(
   field: string,
   values: string[],
   op: FilterOp,
+  valueAliases: Record<string, string[]>,
 ): StringFilterMatch | null {
   const tail = query.slice(hintSpan.end, Math.min(query.length, hintSpan.end + 80));
   const normalizedTail = normalizeText(tail).replace(/^(?:\s|de|del|la|el|con|en|:|-)+/i, '');
@@ -361,7 +375,11 @@ function extractExplicitStringMatch(
 
   for (const value of values) {
     // Explicit (hinted) matches may use numeric aliases: "ancho 100" → "100cm".
-    const valueMatch = findValueMatch(normalizedTail, value, { allowNumericAlias: true });
+    const valueMatch = findFirstValueMatch(
+      normalizedTail,
+      [value, ...aliasesForValue(value, valueAliases)],
+      { allowNumericAlias: true },
+    );
     if (valueMatch) {
       const valueStart = hintSpan.end + valueMatch.span.start;
       const candidate = {
@@ -498,6 +516,30 @@ function findValueMatch(
     if (span) return { span, length: token.length };
   }
   return null;
+}
+
+function findFirstValueMatch(
+  normalizedText: string,
+  values: string[],
+  options?: { allowNumericAlias?: boolean },
+): { span: { start: number; end: number }; length: number } | null {
+  let best: { span: { start: number; end: number }; length: number } | null = null;
+  for (const value of values) {
+    const match = findValueMatch(normalizedText, value, options);
+    if (match && (!best || match.length > best.length)) best = match;
+  }
+  return best;
+}
+
+function aliasesForValue(
+  value: string,
+  aliases: Record<string, string[]>,
+): string[] {
+  const normalizedValue = normalizeText(value);
+  for (const [canonical, alternatives] of Object.entries(aliases)) {
+    if (normalizeText(canonical) === normalizedValue) return alternatives;
+  }
+  return [];
 }
 
 /**

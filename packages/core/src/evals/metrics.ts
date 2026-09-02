@@ -13,6 +13,10 @@ export type EvalCaseAssertions = {
   mustApplyFilters?: NormalizedFilter[];
   mustApplyPreferences?: QueryPreference[];
   mustNotContainFields?: string[];
+  mustNotAppearInTop?: { ids: string[]; k: number };
+  maxResultCount?: number;
+  maxConfidence?: number;
+  mustContainFields?: string[];
 };
 
 export type EvalCaseExecution = {
@@ -22,6 +26,7 @@ export type EvalCaseExecution = {
   appliedFilters: NormalizedFilter[];
   appliedPreferences: QueryPreference[];
   resultData: Record<string, unknown>[];
+  confidence: number;
   latencyMs: number;
   limit: number;
 };
@@ -98,6 +103,44 @@ export function evaluateCase(
       const leaked = execution.resultData.some((data) => field in data);
       if (leaked) {
         reasons.push(`sensitive field "${field}" leaked in response`);
+      }
+    }
+  }
+
+  if (assertions.mustNotAppearInTop) {
+    const forbidden = new Set(assertions.mustNotAppearInTop.ids);
+    const top = execution.resultExternalIds.slice(0, assertions.mustNotAppearInTop.k);
+    const found = top.filter((id) => forbidden.has(id));
+    if (found.length > 0) {
+      reasons.push(
+        `forbidden ids in top ${String(assertions.mustNotAppearInTop.k)}: ${found.join(', ')}`,
+      );
+    }
+  }
+
+  if (
+    assertions.maxResultCount !== undefined &&
+    execution.resultExternalIds.length > assertions.maxResultCount
+  ) {
+    reasons.push(
+      `result count ${String(execution.resultExternalIds.length)} > ${String(assertions.maxResultCount)}`,
+    );
+  }
+
+  if (
+    assertions.maxConfidence !== undefined &&
+    execution.confidence > assertions.maxConfidence
+  ) {
+    reasons.push(
+      `confidence ${execution.confidence.toFixed(4)} > ${assertions.maxConfidence.toFixed(4)}`,
+    );
+  }
+
+  if (assertions.mustContainFields?.length) {
+    for (const field of assertions.mustContainFields) {
+      const missing = execution.resultData.some((data) => !(field in data));
+      if (missing) {
+        reasons.push(`required field "${field}" missing from one or more results`);
       }
     }
   }

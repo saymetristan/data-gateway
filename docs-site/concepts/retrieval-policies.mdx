@@ -12,6 +12,7 @@ Una política de retrieval es un documento versionado, separado del mapping, que
 - comportamiento implícito `filter`, `prefer` o `search`;
 - boost de preferencias;
 - pesos lexical/vector de la fusión RRF.
+- aliases de valores y umbrales de calidad por hit.
 
 <Info>
   Crear, evaluar o activar una política no modifica `records`, embeddings ni
@@ -51,6 +52,9 @@ Al consultar, el Gateway carga en batch la política activa. Los aliases de poli
           {
             "field": "collections",
             "aliases": ["línea", "temporada"],
+            "valueAliases": {
+              "Verano": ["summer", "temporada cálida"]
+            },
             "implicitBehavior": "prefer",
             "boost": 0.35
           }
@@ -58,6 +62,10 @@ Al consultar, el Gateway carga en batch la política activa. Los aliases de poli
         "rrf": {
           "lexicalWeight": 1,
           "vectorWeight": 1.1
+        },
+        "quality": {
+          "minRelevance": 0.42,
+          "minPrimaryFieldCoverage": 0.2
         }
       }
     ]
@@ -66,22 +74,17 @@ Al consultar, el Gateway carga en batch la política activa. Los aliases de poli
 }
 ```
 
-Una entidad debe definir al menos `synonyms`, `fields` o `rrf`.
+Una entidad debe definir al menos `synonyms`, `fields`, `rrf` o `quality`.
 
 ### Configuración por campo
 
 - `field`: nombre público exacto del mapping.
 - `aliases`: nombres adicionales que el usuario puede emplear.
+- `valueAliases`: mapa de valor canónico a expresiones equivalentes. El filtro siempre usa el valor canónico del profile.
 - `implicitBehavior`: solo controla coincidencias implícitas en texto libre. Una mención explícita como `"color blanco"` sigue siendo filtro duro.
 - `boost`: fuerza de la preferencia entre `0` y `1`.
 
 El campo debe existir, ser visible, no sensible y filterable en el mapping activo. La cardinalidad y el operador predeterminado siguen perteneciendo al mapping.
-
-<Warning>
-  Aunque el contrato de policy reserva `valueAliases` y `match`, no los uses como overrides
-  operativos hasta que aparezcan reflejados en capabilities. Envía valores canónicos de
-  `suggestedValues` y define `match` en el mapping.
-</Warning>
 
 ### Pesos RRF
 
@@ -89,6 +92,13 @@ El campo debe existir, ser visible, no sensible y filterable en el mapping activ
 - `vectorWeight`: peso positivo de la similitud semántica.
 
 Empieza con los valores del mapping y cambia los pesos solo con evals representativos. Un peso mayor no garantiza mejor calidad para todos los queries.
+
+### Umbrales de calidad
+
+- `minRelevance`: elimina hits cuyo `results[].score` queda por debajo del umbral.
+- `minPrimaryFieldCoverage`: exige que una fracción de los conceptos aparezca en campos con `searchWeight: "A"`. Evita aceptar como producto correcto un título incompatible solo porque una descripción secundaria comparte términos.
+
+Los aliases de sinónimos se evalúan como un mismo concepto: `19 litros`, `19 LTS` y `19L` no inflan el denominador de cobertura. Los matches exactos de identificador no se podan.
 
 ## Estados y activación
 

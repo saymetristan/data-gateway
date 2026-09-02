@@ -13,6 +13,11 @@ export const mustRankAboveSchema = z.object({
   lower: z.string().min(1),
 });
 
+export const mustNotAppearInTopSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1),
+  k: z.number().int().min(1).max(50),
+});
+
 export const createEvalCaseSchema = z
   .object({
     query: z.string().min(1),
@@ -22,6 +27,10 @@ export const createEvalCaseSchema = z
     mustApplyFilters: z.array(normalizedFilterSchema).optional(),
     mustApplyPreferences: z.array(queryPreferenceSchema).optional(),
     mustNotContainFields: z.array(z.string().min(1)).optional(),
+    mustNotAppearInTop: mustNotAppearInTopSchema.optional(),
+    maxResultCount: z.number().int().min(0).max(50).optional(),
+    maxConfidence: z.number().min(0).max(1).optional(),
+    mustContainFields: z.array(z.string().min(1)).optional(),
   })
   .refine(
     (value) =>
@@ -30,7 +39,11 @@ export const createEvalCaseSchema = z
       (value.mustRankAbove?.length ?? 0) > 0 ||
       (value.mustApplyFilters?.length ?? 0) > 0 ||
       (value.mustApplyPreferences?.length ?? 0) > 0 ||
-      (value.mustNotContainFields?.length ?? 0) > 0,
+      (value.mustNotContainFields?.length ?? 0) > 0 ||
+      value.mustNotAppearInTop !== undefined ||
+      value.maxResultCount !== undefined ||
+      value.maxConfidence !== undefined ||
+      (value.mustContainFields?.length ?? 0) > 0,
     { message: 'At least one assertion is required' },
   );
 

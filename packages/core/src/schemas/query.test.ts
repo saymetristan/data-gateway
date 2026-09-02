@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { queryRequestSchema } from './query.js';
+import { queryRequestSchema, queryResultSchema } from './query.js';
 
 describe('queryRequestSchema', () => {
   it('accepts free-text only', () => {
@@ -45,5 +45,15 @@ describe('queryRequestSchema', () => {
       filters: { available: true, color: 'Azul' },
     });
     expect(parsed.filters).toEqual({ available: true, color: 'Azul' });
+  });
+
+  it('acota la relevancia individual a cero-uno', () => {
+    const base = {
+      id: crypto.randomUUID(),
+      entity: 'product',
+      data: { sku: 'SKU-1' },
+    };
+    expect(queryResultSchema.safeParse({ ...base, score: 0.82 }).success).toBe(true);
+    expect(queryResultSchema.safeParse({ ...base, score: 1.01 }).success).toBe(false);
   });
 });

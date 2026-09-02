@@ -20,7 +20,9 @@ describe('eval metrics', () => {
         query: 'test',
         resultExternalIds: ['1'],
         appliedFilters: [{ field: 'price', op: 'lt', value: 100 }],
+        appliedPreferences: [],
         resultData: [{ sku: 'A' }],
+        confidence: 0.8,
         latencyMs: 10,
         limit: 10,
       },
@@ -34,6 +36,38 @@ describe('eval metrics', () => {
 
     expect(result.passed).toBe(false);
     expect(result.reasons.some((reason) => reason.includes('color'))).toBe(true);
+  });
+
+  it('valida exclusiones top-k, cardinalidad, confidence y campos requeridos', () => {
+    const result = evaluateCase(
+      {
+        caseId: 'quality',
+        query: 'aceite para motocicleta 4 tiempos',
+        resultExternalIds: ['05-ADICUTSC', '122724'],
+        appliedFilters: [],
+        appliedPreferences: [],
+        resultData: [{ item_code: '05-ADICUTSC' }, {}],
+        confidence: 0.61,
+        latencyMs: 10,
+        limit: 10,
+      },
+      {
+        mustNotAppearInTop: { ids: ['05-ADICUTSC', '101-3744', '122724'], k: 3 },
+        maxResultCount: 0,
+        maxConfidence: 0.45,
+        mustContainFields: ['item_code'],
+      },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('forbidden ids in top 3'),
+        expect.stringContaining('result count'),
+        expect.stringContaining('confidence'),
+        expect.stringContaining('required field'),
+      ]),
+    );
   });
 
   it('compara valores de filtros con la misma semántica del runner', () => {

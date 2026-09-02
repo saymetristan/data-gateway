@@ -431,6 +431,24 @@ export function resolveEntityRrf(
   return legacy;
 }
 
+export type ResolvedEntityQuality = {
+  minRelevance: number;
+  minPrimaryFieldCoverage: number;
+};
+
+export function resolveEntityQuality(
+  policy: ActiveRetrievalPolicy | undefined,
+  entity: string,
+): ResolvedEntityQuality {
+  const quality = policy?.document.entities.find(
+    (item) => item.entity === entity,
+  )?.quality;
+  return {
+    minRelevance: quality?.minRelevance ?? 0,
+    minPrimaryFieldCoverage: quality?.minPrimaryFieldCoverage ?? 0,
+  };
+}
+
 function assertExpectedActiveVersion(
   expected: number | undefined,
   actual: number | undefined,

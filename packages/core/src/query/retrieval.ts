@@ -34,6 +34,9 @@ export type RetrievalHit = {
   searchSource: string;
   score: number;
   lexicalMatch: boolean;
+  lexicalRank?: number;
+  vectorDistance?: number;
+  exactIdentifier?: boolean;
 };
 
 export type HybridSearchInput = {
@@ -493,6 +496,8 @@ export function lexicalRowsToHits(rows: RawRecordRow[], limit: number): Retrieva
     searchSource: row.search_source,
     score: row.rank ?? 1 - index * 0.001,
     lexicalMatch: row.lexical_match ?? true,
+    ...(row.rank !== undefined ? { lexicalRank: row.rank } : {}),
+    ...(row.identifier_match ? { exactIdentifier: true } : {}),
   }));
 }
 
@@ -543,6 +548,8 @@ function fuseHits(
   for (const row of [...lexicalRows, ...vectorRows]) {
     rowById.set(row.id, row);
   }
+  const lexicalById = new Map(lexicalRows.map((row) => [row.id, row]));
+  const vectorById = new Map(vectorRows.map((row) => [row.id, row]));
 
   const hits: RetrievalHit[] = [];
   const identifierIds = lexicalRows
@@ -555,6 +562,8 @@ function fuseHits(
   for (const item of ordered.slice(0, input.limit)) {
     const row = rowById.get(item.id);
     if (!row) continue;
+    const lexicalRank = lexicalById.get(row.id)?.rank;
+    const vectorDistance = vectorById.get(row.id)?.distance;
     hits.push({
       id: row.id,
       entity: row.entity,
@@ -563,6 +572,9 @@ function fuseHits(
       searchSource: row.search_source,
       score: item.score,
       lexicalMatch: row.lexical_match ?? lexicalRanking.includes(row.id),
+      ...(lexicalRank !== undefined ? { lexicalRank } : {}),
+      ...(vectorDistance !== undefined ? { vectorDistance } : {}),
+      ...(identifierIds.includes(row.id) ? { exactIdentifier: true } : {}),
     });
   }
   return hits;
