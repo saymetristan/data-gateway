@@ -126,7 +126,8 @@ Este shorthand se normaliza a `eq` para escalares y `in` para arrays. Para contr
 - `applied_filters`: restricciones realmente aplicadas, incluidas las inferidas.
 - `applied_preferences`: boosts realmente aplicados.
 - `query_type`: `filter_only`, `lexical` o `hybrid_search`.
-- `confidence`: señal determinística entre `0` y `1`; no es una respuesta generada por LLM.
+- `results[].score`: relevancia determinística del hit entre `0` y `1`, ordenada de mayor a menor y comparable dentro de esta respuesta. Combina retrieval, cobertura de términos por campo y similitud vectorial; no es una probabilidad global.
+- `confidence`: calidad determinística del conjunto entre `0` y `1`; es independiente de `results[].score` y no es una respuesta generada por LLM.
 - `warnings`: ambigüedades o degradaciones no fatales.
 
 ## Errores

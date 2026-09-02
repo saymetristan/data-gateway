@@ -27,6 +27,10 @@ Para cada caso (query), defines aserciones. Al menos una es obligatoria:
 | `mustApplyFilters` | El run debió aplicar esos filtros duros |
 | `mustApplyPreferences` | El run debió aplicar esas preferencias blandas |
 | `mustNotContainFields` | Ningún resultado puede filtrar campos sensibles |
+| `mustNotAppearInTop` | `{ "ids": ["id-a"], "k": 3 }` — esos IDs no pueden aparecer en el top K |
+| `maxResultCount` | Límite de resultados permitido; usa `0` cuando la respuesta correcta es vacía |
+| `maxConfidence` | Techo de confidence del envelope para consultas sin evidencia suficiente |
+| `mustContainFields` | Todos los resultados deben incluir los campos visibles indicados, por ejemplo `item_code` |
 
 Si un case quedó mal definido, bórralo con `DELETE /evals/sets/:id/cases/:caseId` y vuelve a crearlo antes del run.
 

@@ -109,16 +109,24 @@ export const retrievalPolicyEntitySchema = z
       })
       .strict()
       .optional(),
+    quality: z
+      .object({
+        minRelevance: z.number().min(0).max(1).optional(),
+        minPrimaryFieldCoverage: z.number().min(0).max(1).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((entity, ctx) => {
     const hasSynonyms = Boolean(entity.synonyms && Object.keys(entity.synonyms.entries).length > 0);
     const hasFields = entity.fields.length > 0;
     const hasRrf = Boolean(entity.rrf);
-    if (!hasSynonyms && !hasFields && !hasRrf) {
+    const hasQuality = Boolean(entity.quality);
+    if (!hasSynonyms && !hasFields && !hasRrf && !hasQuality) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Entity policy must define synonyms, fields, or rrf',
+        message: 'Entity policy must define synonyms, fields, rrf, or quality',
       });
     }
 

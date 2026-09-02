@@ -29,6 +29,9 @@ flowchart LR
 2. Cada match se resuelve con `retrieval.inferredBehavior` del campo.
 3. Búsqueda híbrida (FTS + embeddings) y fusión RRF.
 4. **Rescore** con boosts blandos acotados (no pueden dominar el ranking).
+5. Cálculo de relevancia por hit con cobertura ponderada por campo y poda según la policy activa.
+
+`results[].score` está acotado a `0..1` y permite ordenar o descartar hits dentro de una respuesta. No es el `confidence` del envelope: el primero describe un record; el segundo describe la calidad del conjunto devuelto.
 
 ## Tres intenciones
 

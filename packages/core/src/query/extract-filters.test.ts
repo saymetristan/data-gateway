@@ -477,4 +477,21 @@ describe('extractFilters', () => {
     );
     expect(result.unresolvedText).toBe('lino');
   });
+
+  it('resuelve valueAliases de policy al valor canónico del profile', () => {
+    const result = extractFilters({
+      query: 'busco playeras',
+      entity: baseEntity,
+      profile,
+      fieldValueAliases: new Map([
+        ['category', { camisetas: ['playeras'] }],
+      ]),
+    });
+
+    expect(result.filters).toContainEqual({
+      field: 'category',
+      op: 'eq',
+      value: 'camisetas',
+    });
+  });
 });

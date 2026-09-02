@@ -106,6 +106,10 @@ export async function createEvalCase(
       mustRankAbove: input.mustRankAbove ?? null,
       expectedTopIds: input.expectedTopIds ?? null,
       mustApplyPreferences: input.mustApplyPreferences ?? null,
+      mustNotAppearInTop: input.mustNotAppearInTop ?? null,
+      maxResultCount: input.maxResultCount ?? null,
+      maxConfidence: input.maxConfidence ?? null,
+      mustContainFields: input.mustContainFields ?? null,
     })
     .returning();
 
@@ -314,6 +318,21 @@ export async function runEvalSet(
       if (evalCase.mustNotContainFields) {
         assertions.mustNotContainFields = evalCase.mustNotContainFields as string[];
       }
+      if (evalCase.mustNotAppearInTop) {
+        assertions.mustNotAppearInTop = evalCase.mustNotAppearInTop as {
+          ids: string[];
+          k: number;
+        };
+      }
+      if (evalCase.maxResultCount !== null) {
+        assertions.maxResultCount = evalCase.maxResultCount;
+      }
+      if (evalCase.maxConfidence !== null) {
+        assertions.maxConfidence = evalCase.maxConfidence;
+      }
+      if (evalCase.mustContainFields) {
+        assertions.mustContainFields = evalCase.mustContainFields as string[];
+      }
 
       const execution = {
         caseId: evalCase.id,
@@ -322,6 +341,7 @@ export async function runEvalSet(
         appliedFilters: response.applied_filters,
         appliedPreferences: response.applied_preferences ?? [],
         resultData: response.results.map((result) => result.data),
+        confidence: response.confidence,
         latencyMs,
         limit: 10,
       };
@@ -640,6 +660,10 @@ export async function seedEvalCasesFromFixture(
       mustRankAbove: evalCase.mustRankAbove ?? null,
       expectedTopIds: evalCase.expectedTopIds ?? null,
       mustApplyPreferences: evalCase.mustApplyPreferences ?? null,
+      mustNotAppearInTop: evalCase.mustNotAppearInTop ?? null,
+      maxResultCount: evalCase.maxResultCount ?? null,
+      maxConfidence: evalCase.maxConfidence ?? null,
+      mustContainFields: evalCase.mustContainFields ?? null,
     });
   }
 }

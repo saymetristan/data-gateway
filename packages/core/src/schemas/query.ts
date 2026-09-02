@@ -67,7 +67,8 @@ export const queryTypeSchema = z.enum(['filter_only', 'lexical', 'hybrid_search'
 export const queryResultSchema = z.object({
   id: z.string().uuid(),
   entity: z.string(),
-  score: z.number(),
+  /** Deterministic per-hit relevance, comparable within one response. */
+  score: z.number().min(0).max(1),
   data: z.record(z.unknown()),
 });
 
