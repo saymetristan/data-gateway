@@ -478,6 +478,37 @@ describe('extractFilters', () => {
     expect(result.unresolvedText).toBe('lino');
   });
 
+  it('prioriza una preferencia explícita de policy sobre filtros legacy ambiguos', () => {
+    const policyEntity: MappingEntity = {
+      ...shopifyEntity,
+      fields: shopifyEntity.fields.map((field) =>
+        field.name === 'fabricType'
+          ? {
+              ...field,
+              retrieval: {
+                cardinality: 'one',
+                match: 'eq',
+                inferredBehavior: 'prefer',
+                boost: 0.5,
+                searchWeight: 'B',
+              },
+            }
+          : field,
+      ),
+    };
+    const result = extractFilters({
+      query: 'lino',
+      entity: policyEntity,
+      profile: shopifyProfile,
+    });
+
+    expect(result.matches).toContainEqual(
+      expect.objectContaining({ field: 'fabricType', value: 'lino' }),
+    );
+    expect(result.matches.some((match) => match.field === 'productType')).toBe(false);
+    expect(result.warnings).not.toContainEqual(expect.stringContaining('Ambiguous'));
+  });
+
   it('resuelve valueAliases de policy al valor canónico del profile', () => {
     const result = extractFilters({
       query: 'busco playeras',
