@@ -118,20 +118,7 @@ export function extractFilters(input: ExtractFiltersInput): ExtractFiltersResult
     }
   }
 
-  const behaviorByField = new Map<
-    string,
-    'filter' | 'prefer' | 'search'
-  >(
-    input.entity.fields.map((field) => [
-      field.name,
-      getFieldRetrieval(field).inferredBehavior,
-    ]),
-  );
-  const selectedStringMatches = selectStringFilterMatches(
-    stringMatches,
-    warnings,
-    behaviorByField,
-  );
+  const selectedStringMatches = selectStringFilterMatches(stringMatches, warnings);
   for (const match of selectedStringMatches) {
     matches.push({
       field: match.field,
@@ -456,7 +443,6 @@ function extractExplicitStringMatch(
 function selectStringFilterMatches(
   matches: StringFilterMatch[],
   warnings: string[],
-  behaviorByField: Map<string, 'filter' | 'prefer' | 'search'>,
 ): StringFilterMatch[] {
   const selected: StringFilterMatch[] = [];
   const fields = new Set<string>();
@@ -481,24 +467,16 @@ function selectStringFilterMatches(
   }
 
   for (const group of groups.values()) {
-    const actionable = group.filter(
-      (match) => behaviorByField.get(match.field) !== 'search',
-    );
-    const preferred = actionable.filter(
-      (match) => behaviorByField.get(match.field) === 'prefer',
-    );
-    const candidates = preferred.length > 0 ? preferred : actionable;
-    const first = candidates[0] ?? group[0];
+    const first = group[0];
     if (!first) continue;
-    if (candidates.length === 0) continue;
-    const uniqueFields = new Set(candidates.map((match) => match.field));
+    const uniqueFields = new Set(group.map((match) => match.field));
     if (uniqueFields.size > 1) {
       warnings.push(
         `Ambiguous string filter "${first.value}" matched multiple fields; leaving it as free text`,
       );
       continue;
     }
-    const match = candidates.sort((left, right) => right.length - left.length)[0];
+    const match = group.sort((left, right) => right.length - left.length)[0];
     if (!match) continue;
     selected.push(match);
     fields.add(match.field);

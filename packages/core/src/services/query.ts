@@ -54,7 +54,6 @@ import {
 import {
   applyPreferenceRescore,
   hasAnyPreferenceMatch,
-  matchedPreferenceFieldCount,
   rankByPreferenceCoverage,
   summarizeSignals,
 } from '../query/rescore.js';
@@ -962,16 +961,7 @@ async function finalizeResponse(args: {
         relevance.primaryFieldCoverage >= prepared.minPrimaryFieldCoverage
       );
     })
-    .sort((left, right) => {
-      const preferenceCoverage =
-        matchedPreferenceFieldCount(rescored.signalsById.get(right.id)) -
-        matchedPreferenceFieldCount(rescored.signalsById.get(left.id));
-      return (
-        preferenceCoverage ||
-        right.score - left.score ||
-        left.id.localeCompare(right.id)
-      );
-    });
+    .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
   const prunedCount = preferenceRanked.length - relevanceRanked.length;
   if (prunedCount > 0) {
     warnings.push(
