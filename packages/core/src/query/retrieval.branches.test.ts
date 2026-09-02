@@ -15,6 +15,22 @@ describe('selectLexicalBranches', () => {
     expect(selected.some((branch) => branch.kind === 'full')).toBe(true);
     expect(selected.some((branch) => /aida/i.test(branch.text))).toBe(true);
   });
+
+  it('reserves branch budget for identifier-like policy aliases', () => {
+    const branches = buildLexicalBranches(
+      'aceite Mobil tapa amarilla cubeta 19 litros',
+      {
+        '19 litros': ['19 lts', '19l', '120035', 'MX15W40', '1300'],
+      },
+    );
+    const selected = selectLexicalBranches(branches);
+    const selectedTexts = selected.map((branch) => branch.text);
+
+    expect(selected).toHaveLength(6);
+    expect(selectedTexts).toEqual(
+      expect.arrayContaining(['MX15W40', '120035', '1300']),
+    );
+  });
 });
 
 describe('multi-branch RRF preference for distinctive hits', () => {
