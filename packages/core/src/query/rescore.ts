@@ -88,8 +88,8 @@ export function rankByPreferenceCoverage(
   signalsById: Map<string, RankingSignal[]>,
 ): RescoreInput[] {
   return [...hits].sort((left, right) => {
-    const leftCoverage = matchedFieldCount(signalsById.get(left.id));
-    const rightCoverage = matchedFieldCount(signalsById.get(right.id));
+    const leftCoverage = matchedPreferenceFieldCount(signalsById.get(left.id));
+    const rightCoverage = matchedPreferenceFieldCount(signalsById.get(right.id));
     return (
       rightCoverage - leftCoverage ||
       right.score - left.score ||
@@ -102,7 +102,9 @@ export function hasAnyPreferenceMatch(
   hits: RescoreInput[],
   signalsById: Map<string, RankingSignal[]>,
 ): boolean {
-  return hits.some((hit) => matchedFieldCount(signalsById.get(hit.id)) > 0);
+  return hits.some(
+    (hit) => matchedPreferenceFieldCount(signalsById.get(hit.id)) > 0,
+  );
 }
 
 function groupPreferencesByField(
@@ -118,7 +120,9 @@ function groupPreferencesByField(
   return grouped;
 }
 
-function matchedFieldCount(signals: RankingSignal[] | undefined): number {
+export function matchedPreferenceFieldCount(
+  signals: RankingSignal[] | undefined,
+): number {
   return (signals ?? []).filter((signal) => signal.matched).length;
 }
 
