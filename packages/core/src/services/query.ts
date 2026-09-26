@@ -950,6 +950,7 @@ async function finalizeResponse(args: {
         data: item.data,
         lexicalMatch: original?.lexicalMatch ?? false,
         exactIdentifier: original?.exactIdentifier ?? false,
+        exactSearchMatch: original?.exactSearchMatch ?? 0,
       };
     })
     .filter((hit) => {
@@ -961,7 +962,11 @@ async function finalizeResponse(args: {
         relevance.primaryFieldCoverage >= prepared.minPrimaryFieldCoverage
       );
     })
-    .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+    .sort((left, right) =>
+      Number(right.exactIdentifier) - Number(left.exactIdentifier) ||
+      right.exactSearchMatch - left.exactSearchMatch ||
+      right.score - left.score || left.id.localeCompare(right.id),
+    );
   const prunedCount = preferenceRanked.length - relevanceRanked.length;
   if (prunedCount > 0) {
     warnings.push(
