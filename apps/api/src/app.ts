@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { timeout } from 'hono/timeout';
 import { sql } from 'drizzle-orm';
@@ -55,6 +55,7 @@ function useWorkspaceProtection(
 }
 
 const REQUEST_TIMEOUT_MS = 25_000;
+const CSV_UPLOAD_TIMEOUT_MS = 540_000;
 
 export function createApp(deps: AppBindings) {
   const app = new Hono<{ Variables: AppVariables }>();
@@ -80,16 +81,20 @@ export function createApp(deps: AppBindings) {
   });
 
   app.use('*', requestLogger());
-  app.use(
-    '*',
-    timeout(
-      REQUEST_TIMEOUT_MS,
+  app.use('*', (c: Context<{ Variables: AppVariables }, string>, next: Next) => {
+    // CSV ingestion is synchronous; other routes retain the short request budget.
+    const duration =
+      c.req.method === 'POST' && /^\/sources\/[^/]+\/upload$/.test(c.req.path)
+        ? CSV_UPLOAD_TIMEOUT_MS
+        : REQUEST_TIMEOUT_MS;
+    return timeout(
+      duration,
       () =>
         new HTTPException(504, {
           message: 'Request timeout',
         }),
-    ),
-  );
+    )(c, next);
+  });
   app.use('*', async (c, next) => {
     c.set('db', deps.db);
     await next();
