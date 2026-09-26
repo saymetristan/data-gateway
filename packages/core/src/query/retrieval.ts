@@ -38,6 +38,8 @@ export type RetrievalHit = {
   lexicalRank?: number;
   vectorDistance?: number;
   exactIdentifier?: boolean;
+  /** Complete search text: 2 for literal equality, 1 for normalized equality. */
+  exactSearchMatch?: number;
 };
 
 export type HybridSearchInput = {
@@ -90,6 +92,7 @@ export type RawRecordRow = {
   distance?: number;
   lexical_match?: boolean;
   identifier_match?: boolean;
+  exact_search_match?: number;
 };
 
 export type IdentifierTarget = {
@@ -315,6 +318,10 @@ export async function lexicalSearchMultiBranch(
   if (rankings.length === 0) return [];
 
   const fused = reciprocalRankFusion(rankings);
+  fused.sort((left, right) =>
+    (rowById.get(right.id)?.exact_search_match ?? 0) -
+    (rowById.get(left.id)?.exact_search_match ?? 0),
+  );
   return fused.slice(0, LEXICAL_CANDIDATE_LIMIT).map((item) => {
     const row = rowById.get(item.id);
     if (!row) {
@@ -344,6 +351,16 @@ export async function lexicalSearchSingle(
   const trimmed = queryText.trim();
   if (!trimmed) return [];
   const useTrigram = isShortSkuLikeQuery(trimmed);
+  // Match the complete request, never an expanded synonym/distinctive branch.
+  // Preserve the existing FTS predicate, including its query syntax and indexes.
+  const completeQuery = scope.freeText.trim();
+  const exactSearchMatch = sql`CASE
+    WHEN r.search_source = ${completeQuery} THEN 2
+    WHEN btrim(regexp_replace(lower(public.f_unaccent(coalesce(r.search_source, ''))),
+      '[[:space:]]+', ' ', 'g')) =
+      btrim(regexp_replace(lower(public.f_unaccent(${completeQuery})),
+        '[[:space:]]+', ' ', 'g')) THEN 1
+    ELSE 0 END`;
 
   const result = await scope.db.execute(sql`
     SELECT
@@ -352,6 +369,7 @@ export async function lexicalSearchSingle(
       r.source_id,
       r.data,
       r.search_source,
+      ${exactSearchMatch} AS exact_search_match,
       ts_rank_cd(
         r.search_text,
         websearch_to_tsquery('es_unaccent', public.f_unaccent(${trimmed}))
@@ -363,7 +381,7 @@ export async function lexicalSearchSingle(
         r.search_text @@ websearch_to_tsquery('es_unaccent', public.f_unaccent(${trimmed}))
         ${useTrigram ? sql`OR similarity(r.search_source, ${trimmed}) > ${TRIGRAM_THRESHOLD}` : sql``}
       )
-    ORDER BY rank DESC, r.updated_at DESC
+    ORDER BY exact_search_match DESC, rank DESC, r.updated_at DESC
     LIMIT ${LEXICAL_CANDIDATE_LIMIT}
   `);
 
@@ -521,6 +539,7 @@ export function lexicalRowsToHits(rows: RawRecordRow[], limit: number): Retrieva
     lexicalMatch: row.lexical_match ?? true,
     ...(row.rank !== undefined ? { lexicalRank: row.rank } : {}),
     ...(row.identifier_match ? { exactIdentifier: true } : {}),
+    ...(row.exact_search_match ? { exactSearchMatch: row.exact_search_match } : {}),
   }));
 }
 
@@ -578,6 +597,10 @@ function fuseHits(
   const identifierIds = lexicalRows
     .filter((row) => row.identifier_match)
     .map((row) => row.id);
+  fused.sort((left, right) =>
+    (lexicalById.get(right.id)?.exact_search_match ?? 0) -
+    (lexicalById.get(left.id)?.exact_search_match ?? 0),
+  );
   const ordered = [
     ...identifierIds.map((id) => ({ id, score: 1 })),
     ...fused.filter((item) => !identifierIds.includes(item.id)),
@@ -587,6 +610,7 @@ function fuseHits(
     if (!row) continue;
     const lexicalRank = lexicalById.get(row.id)?.rank;
     const vectorDistance = vectorById.get(row.id)?.distance;
+    const exactSearchMatch = lexicalById.get(row.id)?.exact_search_match;
     hits.push({
       id: row.id,
       entity: row.entity,
@@ -598,6 +622,7 @@ function fuseHits(
       ...(lexicalRank !== undefined ? { lexicalRank } : {}),
       ...(vectorDistance !== undefined ? { vectorDistance } : {}),
       ...(identifierIds.includes(row.id) ? { exactIdentifier: true } : {}),
+      ...(exactSearchMatch ? { exactSearchMatch } : {}),
     });
   }
   return hits;
