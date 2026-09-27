@@ -3,6 +3,49 @@ import type { Database } from '../db/client.js';
 import { records, sourceRecordsRaw } from '../db/schema/index.js';
 import { payloadHash } from '../utils/hash.js';
 
+export async function upsertRawRecords(
+  db: Database,
+  sourceId: string,
+  rows: { sourceRecordId: string; payload: Record<string, unknown> }[],
+): Promise<number> {
+  const existing = await db
+    .select({
+      sourceRecordId: sourceRecordsRaw.sourceRecordId,
+      payloadHash: sourceRecordsRaw.payloadHash,
+    })
+    .from(sourceRecordsRaw)
+    .where(eq(sourceRecordsRaw.sourceId, sourceId));
+  const hashes = new Map(existing.map((row) => [row.sourceRecordId, row.payloadHash]));
+  const changed = new Map<string, typeof sourceRecordsRaw.$inferInsert>();
+  let imported = 0;
+
+  // Count each transition as the serial writer did, but persist the final payload
+  // once per identifier (Postgres cannot upsert the same key twice in one batch).
+  for (const row of rows) {
+    const hash = payloadHash(row.payload);
+    if (hashes.get(row.sourceRecordId) === hash) continue;
+    imported += 1;
+    hashes.set(row.sourceRecordId, hash);
+    changed.set(row.sourceRecordId, { ...row, sourceId, payloadHash: hash });
+  }
+
+  const pending = [...changed.values()];
+  for (let offset = 0; offset < pending.length; offset += 500) {
+    await db
+      .insert(sourceRecordsRaw)
+      .values(pending.slice(offset, offset + 500))
+      .onConflictDoUpdate({
+        target: [sourceRecordsRaw.sourceId, sourceRecordsRaw.sourceRecordId],
+        set: {
+          payload: sql`excluded.payload`,
+          payloadHash: sql`excluded.payload_hash`,
+          syncedAt: new Date(),
+        },
+      });
+  }
+  return imported;
+}
+
 export async function upsertRawRecord(
   db: Database,
   sourceId: string,
