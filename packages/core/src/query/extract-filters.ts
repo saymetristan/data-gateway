@@ -393,7 +393,9 @@ function extractExplicitStringMatch(
 
     const partial = firstMeaningfulTailToken(normalizedTail);
     const normalizedValue = normalizeText(value);
-    if (partial && normalizedValue.includes(partial)) {
+    // Bare numbers must not match fragments of model codes (30 inside DT530).
+    // Measurement prefixes such as "ancho 100" still resolve via valueTokens above.
+    if (partial && /[a-z]/i.test(partial) && normalizedValue.includes(partial)) {
       const partialSpan = findNormalizedTokenSpan(normalizedTail, partial);
       const valueStart = hintSpan.end + (partialSpan?.start ?? 0);
       const candidate = {
