@@ -13,6 +13,7 @@ import {
   normalizeText,
 } from './text-utils.js';
 import { reciprocalRankFusion } from './rrf.js';
+import { buildCatalogVisibilityCondition } from './catalog-visibility.js';
 
 const LEXICAL_CANDIDATE_LIMIT = 50;
 const VECTOR_CANDIDATE_LIMIT = 50;
@@ -465,6 +466,14 @@ export async function vectorSearchForSource(
         WHERE re.embedding_model = ${input.embeddingModel}
           AND re.mapping_version = ${input.mappingVersion}
           AND settings.iterative_scan IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM records r
+            WHERE r.id = re.record_id
+              AND (
+                r.workspace_id <> ${input.workspaceId}
+                OR ${buildCatalogVisibilityCondition(input.workspaceId)}
+              )
+          )
         ORDER BY re.embedding <=> ${vectorLiteral}::vector
         LIMIT ${VECTOR_PROBE_LIMIT}
       ) candidate
@@ -672,7 +681,10 @@ function buildWhereClause(input: {
   filters: NormalizedFilter[];
   filterableFields: Set<string>;
 }): SQL {
-  const parts: SQL[] = [sql`r.workspace_id = ${input.workspaceId}`];
+  const parts: SQL[] = [
+    sql`r.workspace_id = ${input.workspaceId}`,
+    buildCatalogVisibilityCondition(input.workspaceId),
+  ];
 
   if (input.sourceIds.length === 1) {
     const sourceId = input.sourceIds[0];
