@@ -47,7 +47,19 @@ no una verificación del runtime desplegado.
 
 ## Estado
 
-El candidato combinado queda validado y conservado en commits locales. Pendientes
+Tris autorizó integrar y publicar el 2026-10-06, después de revisar las PR #23 y
+Levantia #138. El candidato se incorporó a la rama de #23 antes del merge, de modo
+que el autodeploy de main conserve CSV bulk y filtros numéricos desde su primera
+revisión. Se vuelve a ejecutar CI completo sobre esta combinación.
+
+Pendientes
 revisión/CI de entrega, pruebas CSV DB con esquema completo, ANN real con pgvector,
-rendimiento/RLS y verificación del runtime que se publique. Sin publicación, PR,
-CI, merge ni deploy desde esta rama.
+rendimiento/RLS y verificación del runtime que se publique. Destino Railway:
+proyecto `be49c553-4d7d-445d-935e-f8a603e15c2d`, production
+`57adb1ff-0cb9-4241-a282-e6a9efb5cd5a`, API
+`f3dd7666-671c-4393-8de9-f8e1f4495c59` y worker
+`3e28e97a-41e6-4d4b-a197-19a63093203c` por autodeploy.
+El MCP `a6d59390-6ad9-45d1-91b9-e9c65168faf4` usa una publicación manual.
+Rollback API: deployment `64beeb83-17bf-464a-9fec-f0db13182f16`;
+worker: `f120ba80-ac20-4818-816c-f20e866fe7f7`;
+MCP: `c3c8d78a-98eb-4bed-872c-ecf91dd6b28d`. Sin cambios de datos o variables.
