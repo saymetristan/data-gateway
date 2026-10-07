@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { queryRequestSchema, queryResultSchema } from './query.js';
+import { normalizeRequestFilters, queryRequestSchema, queryResultSchema } from './query.js';
 
 describe('queryRequestSchema', () => {
+  it('accepts the Levantia batch visibility request and normalizes SKU membership', () => {
+    const parsed = queryRequestSchema.parse({
+      entity: 'product',
+      query: '',
+      filters: { item_code: ['SKU-1', 'SKU-2'] },
+      limit: 50,
+    });
+    expect(normalizeRequestFilters(parsed.filters)).toEqual([
+      { field: 'item_code', op: 'in', value: ['SKU-1', 'SKU-2'] },
+    ]);
+  });
+
   it('accepts free-text only', () => {
     const parsed = queryRequestSchema.parse({ query: 'tela azul' });
     expect(parsed.query).toBe('tela azul');
