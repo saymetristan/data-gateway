@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { MappingEntity } from '../schemas/mapping.js';
 import type { SourceProfileDocument } from '../schemas/profile.js';
-import { extractFilters } from './extract-filters.js';
+import { extractFilters, resolveExtractedMatches } from './extract-filters.js';
 
 const baseEntity: MappingEntity = {
   entity: 'product',
@@ -271,6 +271,101 @@ function runShopify(query: string) {
 }
 
 describe('extractFilters', () => {
+  const tractodieselEntity: MappingEntity = {
+    ...baseEntity,
+    fields: [{
+      name: 'menu3', sourceColumn: 'menu3', type: 'string',
+      label: 'menu3', filterLabel: 'menu3', aliases: [],
+      filterable: true, searchable: true, visible: true, sensitive: false,
+      retrieval: { cardinality: 'one', match: 'eq', inferredBehavior: 'filter' },
+    }],
+  };
+  const tractodieselProfile: SourceProfileDocument = {
+    totalRecords: 2, profiledAt: '2026-09-28T00:00:00.000Z',
+    tables: [{ table: 'products', recordCount: 2, columns: [{
+      name: 'menu3', inferredType: 'string', cardinality: 2, nullCount: 0, nullRate: 0,
+      suggestedValues: [
+        { value: 'DT408, DT466, DT530 NGD 93-99', count: 1 },
+        { value: 'FRENOS', count: 1 },
+      ],
+      topValues: [],
+    }] }],
+  };
+
+  it('mantiene tipo 30 como búsqueda con el mapping menu3 de Tractodiesel', () => {
+    const result = extractFilters({
+      query: 'diafragma tipo 30', entity: tractodieselEntity, profile: tractodieselProfile,
+    });
+    expect(result.filters).toEqual([]);
+    expect(result.matches).toEqual([]);
+    expect(result.unresolvedText).toBe('diafragma tipo 30');
+  });
+
+  it('mantiene íntegro diafragma tipo 30 con el alias de policy v8', () => {
+    // prepareQuery overlays the active policy aliases onto the mapping fields.
+    const policyEntity: MappingEntity = {
+      ...tractodieselEntity,
+      fields: tractodieselEntity.fields.map((field) => ({ ...field, aliases: ['tipo'] })),
+    };
+    const query = 'diafragma tipo 30';
+    const extracted = extractFilters({ query, entity: policyEntity, profile: tractodieselProfile });
+    expect(extracted.unresolvedText).toBe(query);
+    expect(extracted.filters).toEqual([]);
+    expect(extracted.matches).toEqual([]);
+
+    const resolved = resolveExtractedMatches({
+      query, matches: extracted.matches,
+      fieldsByName: new Map(policyEntity.fields.map((field) => [field.name, field])),
+      // The policy's implicitBehavior=search does not override explicit hints.
+      resolveBehavior: (_field, origin) => origin === 'explicit' ? 'filter' : 'search',
+    });
+    expect(resolved.filters).toEqual([]);
+    expect(resolved.preferences).toEqual([]);
+    expect(resolved.unresolvedText).toBe(query);
+
+    const value = 'DT408, DT466, DT530 NGD 93-99';
+    const explicit = extractFilters({
+      query: `diafragma tipo ${value}`, entity: policyEntity, profile: tractodieselProfile,
+    });
+    expect(explicit.matches).toContainEqual(
+      expect.objectContaining({ field: 'menu3', op: 'eq', value, origin: 'explicit' }),
+    );
+  });
+
+  it('conserva el valor completo y el hint explícito de menu3', () => {
+    const value = 'DT408, DT466, DT530 NGD 93-99';
+    for (const query of [value, `menu3 ${value}`]) {
+      const result = extractFilters({ query, entity: tractodieselEntity, profile: tractodieselProfile });
+      expect(result.filters).toEqual([{ field: 'menu3', op: 'eq', value }]);
+      expect(result.matches[0]?.origin).toBe(query === value ? 'implicit' : 'explicit');
+    }
+  });
+
+  it.each(['30', '530', '99'])('no infiere menu3 por el fragmento numérico %s', (fragment) => {
+    const query = `diafragma menu3 ${fragment}`;
+    const result = extractFilters({
+      query, entity: tractodieselEntity, profile: tractodieselProfile,
+    });
+    expect(result.filters).toEqual([]);
+    expect(result.unresolvedText).toBe(query);
+  });
+
+  it('mantiene ancho 1.50 como prefijo de una medida sin espacios', () => {
+    const widthProfile: SourceProfileDocument = {
+      ...shopifyProfile,
+      tables: shopifyProfile.tables.map((table) => ({
+        ...table,
+        columns: table.columns.map((column) => column.name === 'width'
+          ? { ...column, topValues: [{ value: '1.50m', count: 1 }] }
+          : column),
+      })),
+    };
+    const result = extractFilters({
+      query: 'tela ancho 1.50', entity: shopifyEntity, profile: widthProfile,
+    });
+    expect(result.filters).toContainEqual({ field: 'width', op: 'eq', value: '1.50m' });
+  });
+
   it('extrae menos de con formato $1,500', () => {
     const result = run('vestido menos de $1,500');
     expect(result.filters).toContainEqual({ field: 'price', op: 'lt', value: 1500 });
