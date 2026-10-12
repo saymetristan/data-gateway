@@ -371,7 +371,7 @@ describe.runIf(hasFixture)('query integration', () => {
     });
   });
 
-  it('escribe query_logs por request', async () => {
+  it('escribe procedencia del proveedor en query_logs y no la atribuye a hits de cache', async () => {
     await withTestDatabase(async (db, testUrl) => {
       const [workspace] = await db
         .insert(workspaces)
@@ -381,12 +381,18 @@ describe.runIf(hasFixture)('query integration', () => {
 
       await bootstrapSource(db, testUrl, workspace.id);
 
+      const provider = new MockEmbeddingProvider(1024);
+      const originalEmbedWithMeta = provider.embedWithMeta.bind(provider);
+      provider.embedWithMeta = async (texts) => {
+        const result = await originalEmbedWithMeta(texts);
+        return { ...result, meta: { ...result.meta, effectiveProvider: 'DeepInfra', providerRequestId: 'gen-emb-fixture' } };
+      };
       await executeQuery({
         db,
         workspaceId: workspace.id,
         apiKeyId: crypto.randomUUID(),
         request: { query: 'camiseta roja menos de 100', limit: 5 },
-        embeddingProvider: new MockEmbeddingProvider(1024),
+        embeddingProvider: provider,
       });
 
       const logs = await db
@@ -398,7 +404,20 @@ describe.runIf(hasFixture)('query integration', () => {
       expect(logs[0]?.latencyMs).toBeGreaterThanOrEqual(0);
       expect(logs[0]?.appliedFilters).toBeTruthy();
       expect(logs[0]?.confidence).toBeGreaterThanOrEqual(0);
-      expect(logs[0]?.metadata).toMatchObject({ vectorStrategy: 'ann_first' });
+      expect(logs[0]?.metadata).toMatchObject({
+        vectorStrategy: 'ann_first', cache: 'miss', providerAttempts: 1,
+        effectiveProvider: 'DeepInfra', providerRequestId: 'gen-emb-fixture', providerRequestShared: false,
+      });
+
+      await executeQuery({
+        db, workspaceId: workspace.id,
+        request: { query: 'camiseta roja menos de 100', limit: 5 }, embeddingProvider: provider,
+      });
+      const allLogs = await db.select().from(queryLogs).where(eq(queryLogs.workspaceId, workspace.id));
+      const warmLog = allLogs.find((log) => log.id !== logs[0]?.id);
+      expect(warmLog?.metadata).toMatchObject({ cache: 'l1', timings: { providerMs: 0 } });
+      expect(warmLog?.metadata).not.toHaveProperty('providerRequestId');
+      expect(warmLog?.metadata).not.toHaveProperty('effectiveProvider');
     });
   });
 

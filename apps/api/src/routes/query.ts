@@ -50,7 +50,7 @@ export function queryRoutes(deps: AppBindings) {
       workspaceId,
       apiKeyId,
       request: parsed.data,
-      embeddingProvider: deps.embeddingProvider,
+      embeddingProvider: deps.embeddingProviderForWorkspace?.(workspaceId) ?? deps.embeddingProvider,
       llmProvider: deps.llmProvider,
       softDeadlineMs: deps.env.EMBEDDING_SOFT_DEADLINE_MS,
       hardTimeoutMs: deps.env.EMBEDDING_HARD_TIMEOUT_MS,

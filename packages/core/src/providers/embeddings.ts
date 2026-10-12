@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   CircuitBreaker,
   getCircuitBreaker,
@@ -15,7 +16,10 @@ export type EmbeddingAttemptMeta = {
   attempts: number;
   circuitState: CircuitState;
   cacheHeaderEnabled: boolean;
-  providerRouting: 'latency';
+  providerRouting: 'latency' | 'ordered';
+  providerOrder?: string[];
+  effectiveProvider?: string;
+  providerRequestId?: string;
   timedOut: boolean;
   skippedByCircuit: boolean;
 };
@@ -73,7 +77,8 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
 }
 
 type OpenRouterEmbeddingResponse = {
-  data: Array<{ embedding: number[] }>;
+  provider?: unknown;
+  id?: unknown;
 };
 
 export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
@@ -84,6 +89,7 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
   private readonly softDeadlineMs: number;
   private readonly hardTimeoutMs: number;
   private readonly maxRetries: number;
+  private readonly providerOrder: string[] | undefined;
   private readonly circuit: CircuitBreaker;
 
   constructor(options: {
@@ -96,6 +102,7 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     maxRetries?: number;
     circuitFailureThreshold?: number;
     circuitRecoveryMs?: number;
+    providerOrder?: string[];
   }) {
     this.apiKey = options.apiKey;
     this.model = options.model;
@@ -104,10 +111,17 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     this.softDeadlineMs = options.softDeadlineMs ?? DEFAULT_EMBEDDING_SOFT_DEADLINE_MS;
     this.hardTimeoutMs = options.hardTimeoutMs ?? DEFAULT_EMBEDDING_HARD_TIMEOUT_MS;
     this.maxRetries = options.maxRetries ?? DEFAULT_EMBEDDING_MAX_RETRIES;
-    this.circuit = getCircuitBreaker(`embeddings:${this.model}`, {
+    this.providerOrder = options.providerOrder?.length ? [...options.providerOrder] : undefined;
+    const circuitOptions = {
       failureThreshold: options.circuitFailureThreshold ?? DEFAULT_CIRCUIT_FAILURE_THRESHOLD,
       recoveryMs: options.circuitRecoveryMs ?? DEFAULT_CIRCUIT_RECOVERY_MS,
-    });
+    };
+    const key = createHash('sha256').update(JSON.stringify({
+      baseUrl: this.baseUrl, apiKey: this.apiKey, model: this.model, dimensions: this.dimensions,
+      providerOrder: this.providerOrder, softDeadlineMs: this.softDeadlineMs,
+      hardTimeoutMs: this.hardTimeoutMs, maxRetries: this.maxRetries, ...circuitOptions,
+    })).digest('hex');
+    this.circuit = getCircuitBreaker(`embeddings:${key}`, circuitOptions);
   }
 
   get softDeadline(): number {
@@ -135,7 +149,7 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
           attempts: 0,
           circuitState: this.circuit.snapshot().state,
           cacheHeaderEnabled: true,
-          providerRouting: 'latency',
+          ...this.routingMeta(),
           timedOut: false,
           skippedByCircuit: false,
         },
@@ -144,14 +158,15 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
 
     const started = Date.now();
     const snapshot = this.circuit.snapshot(started);
-    if (!this.circuit.canRequest(started)) {
+    const attempt = this.circuit.acquireRequest(started);
+    if (!attempt) {
       throw Object.assign(new Error('Embedding circuit open; skipping remote call'), {
         code: 'CIRCUIT_OPEN',
         meta: {
           attempts: 0,
           circuitState: snapshot.state,
           cacheHeaderEnabled: true,
-          providerRouting: 'latency' as const,
+          ...this.routingMeta(),
           timedOut: false,
           skippedByCircuit: true,
         } satisfies EmbeddingAttemptMeta,
@@ -162,6 +177,8 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     let attempts = 0;
     let lastError: unknown;
     let timedOut = false;
+    let effectiveProvider: string | undefined;
+    let providerRequestId: string | undefined;
 
     while (attempts <= this.maxRetries) {
       const remaining = budgetMs - (Date.now() - started);
@@ -184,38 +201,46 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
             input: texts,
             dimensions: this.dimensions,
             provider: {
-              sort: 'latency',
+              ...(this.providerOrder ? { order: this.providerOrder } : { sort: 'latency' }),
               allow_fallbacks: true,
             },
           }),
           signal: AbortSignal.timeout(remaining),
         });
 
-        if ([429, 502, 503, 504].includes(response.status) && attempts <= this.maxRetries) {
+        timedOut = false;
+        if (!response.ok) {
+          lastError = new Error(`OpenRouter embeddings failed (${String(response.status)})`);
+          await response.body?.cancel().catch(() => undefined);
+          if (![429, 502, 503, 504].includes(response.status) || attempts > this.maxRetries) break;
           const retryRemaining = budgetMs - (Date.now() - started);
-          if (retryRemaining <= 50) {
-            timedOut = true;
-            break;
-          }
           const delayMs = retryDelayMs(response.headers.get('Retry-After'), attempts);
-          await sleep(Math.min(delayMs, retryRemaining - 50));
+          if (delayMs + 50 >= retryRemaining) break;
+          await sleep(delayMs);
           continue;
         }
 
-        if (!response.ok) {
-          const body = await response.text();
-          throw new Error(`OpenRouter embeddings failed (${String(response.status)}): ${body}`);
-        }
-
-        const json = (await response.json()) as OpenRouterEmbeddingResponse;
-        this.circuit.recordSuccess();
+        const json: unknown = await response.json().catch((error: unknown) => {
+          if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+            throw new DOMException('Embedding response body timed out', 'TimeoutError');
+          }
+          throw new Error('OpenRouter embeddings returned invalid JSON');
+        });
+        const identifiers = typeof json === 'object' && json !== null
+          ? json as OpenRouterEmbeddingResponse : undefined;
+        effectiveProvider = safeIdentifier(identifiers?.provider);
+        providerRequestId = safeIdentifier(identifiers?.id);
+        const vectors = validateVectors(json, texts.length, this.dimensions);
+        this.circuit.recordSuccess(Date.now(), attempt);
         return {
-          vectors: json.data.map((item) => item.embedding),
+          vectors,
           meta: {
             attempts,
             circuitState: this.circuit.snapshot().state,
             cacheHeaderEnabled: true,
-            providerRouting: 'latency',
+            ...this.routingMeta(),
+            ...(effectiveProvider ? { effectiveProvider } : {}),
+            ...(providerRequestId ? { providerRequestId } : {}),
             timedOut: false,
             skippedByCircuit: false,
           },
@@ -228,16 +253,19 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
           budgetMs - (Date.now() - started) > 50 &&
           (timedOut || isTransientError(error));
         if (!canRetry) break;
-        await sleep(Math.min(150, budgetMs - (Date.now() - started)));
+        if (budgetMs - (Date.now() - started) <= 200) break;
+        await sleep(150);
       }
     }
 
-    this.circuit.recordFailure();
+    this.circuit.recordFailure(Date.now(), attempt);
     const meta: EmbeddingAttemptMeta = {
       attempts,
       circuitState: this.circuit.snapshot().state,
       cacheHeaderEnabled: true,
-      providerRouting: 'latency',
+      ...this.routingMeta(),
+      ...(effectiveProvider ? { effectiveProvider } : {}),
+      ...(providerRequestId ? { providerRequestId } : {}),
       timedOut,
       skippedByCircuit: false,
     };
@@ -251,6 +279,31 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
       meta,
     });
   }
+
+  private routingMeta(): Pick<EmbeddingAttemptMeta, 'providerRouting' | 'providerOrder'> {
+    return this.providerOrder
+      ? { providerRouting: 'ordered', providerOrder: [...this.providerOrder] }
+      : { providerRouting: 'latency' };
+  }
+}
+
+function safeIdentifier(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= 128 &&
+    /^[a-zA-Z0-9][a-zA-Z0-9._:/ -]*$/.test(value) ? value : undefined;
+}
+
+function validateVectors(json: unknown, count: number, dimensions: number): number[][] {
+  if (typeof json !== 'object' || json === null || !('data' in json) || !Array.isArray(json.data)) {
+    throw new Error('OpenRouter embeddings returned invalid vectors');
+  }
+  const data: unknown[] = json.data;
+  if (data.length !== count || data.some((item) =>
+    typeof item !== 'object' || item === null || !('embedding' in item) ||
+    !Array.isArray(item.embedding) || item.embedding.length !== dimensions ||
+    item.embedding.some((value: unknown) => typeof value !== 'number' || !Number.isFinite(value)))) {
+    throw new Error('OpenRouter embeddings returned invalid vectors');
+  }
+  return data.map((item) => (item as { embedding: number[] }).embedding);
 }
 
 function retryDelayMs(retryAfter: string | null, attempt: number): number {

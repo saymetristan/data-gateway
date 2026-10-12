@@ -39,7 +39,7 @@ export function toolRoutes(deps: AppBindings) {
       apiKeyId,
       toolName,
       args: parsed.data.args,
-      embeddingProvider: deps.embeddingProvider,
+      embeddingProvider: deps.embeddingProviderForWorkspace?.(workspaceId) ?? deps.embeddingProvider,
       llmProvider: deps.llmProvider,
       softDeadlineMs: deps.env.EMBEDDING_SOFT_DEADLINE_MS,
       hardTimeoutMs: deps.env.EMBEDDING_HARD_TIMEOUT_MS,

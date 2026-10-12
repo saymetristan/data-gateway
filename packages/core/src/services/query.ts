@@ -119,6 +119,11 @@ export type QueryResilienceMetadata = {
   vectorStrategy?: 'ann_first';
   circuitState?: string;
   providerAttempts?: number;
+  providerRouting?: EmbeddingAttemptMeta['providerRouting'];
+  effectiveProvider?: string;
+  providerRequestId?: string;
+  /** True when this query awaited another query's in-flight provider call. */
+  providerRequestShared?: boolean;
   fallbackReason?: string;
   /** True when the embedding arrived after softDeadlineMs but before hardTimeoutMs. */
   slowEmbedding?: boolean;
@@ -175,6 +180,7 @@ type EmbeddingResolution = {
   providerMs: number;
   cacheMs: number;
   providerMeta?: EmbeddingAttemptMeta;
+  providerRequestShared?: boolean;
   fallbackReason?: string;
   /** Soft deadline exceeded but embedding still used (telemetry only). */
   slowEmbedding?: boolean;
@@ -432,6 +438,16 @@ export async function executeQuery(input: ExecuteQueryInput): Promise<QueryRespo
     if (embeddingResolution.providerMeta) {
       metadata.circuitState = embeddingResolution.providerMeta.circuitState;
       metadata.providerAttempts = embeddingResolution.providerMeta.attempts;
+      metadata.providerRouting = embeddingResolution.providerMeta.providerRouting;
+      if (embeddingResolution.providerMeta.effectiveProvider) {
+        metadata.effectiveProvider = embeddingResolution.providerMeta.effectiveProvider;
+      }
+      if (embeddingResolution.providerMeta.providerRequestId) {
+        metadata.providerRequestId = embeddingResolution.providerMeta.providerRequestId;
+      }
+    }
+    if (embeddingResolution.providerRequestShared !== undefined) {
+      metadata.providerRequestShared = embeddingResolution.providerRequestShared;
     }
     if (embeddingResolution.fallbackReason) {
       metadata.fallbackReason = embeddingResolution.fallbackReason;
@@ -659,17 +675,19 @@ async function resolveQueryEmbedding(
 
   const providerStarted = Date.now();
 
-  const providerPromise = cache.resolveOrLoad(inflightKey, async () => {
+  const providerLoad = cache.resolveOrLoadWithMeta(inflightKey, async () => {
     if (input.embeddingProvider.embedWithMeta) {
       const result = await input.embeddingProvider.embedWithMeta([queryText]);
       const vector = result.vectors[0];
       if (!vector) throw new Error('Empty embedding');
-      return vector;
+      return { embedding: vector, providerMeta: result.meta };
     }
     const [vector] = await input.embeddingProvider.embed([queryText]);
     if (!vector) throw new Error('Empty embedding');
-    return vector;
+    return { embedding: vector };
   });
+
+  const providerPromise = providerLoad.promise;
 
   // Soft deadline is telemetry only. Wait until hard timeout before lexical fallback
   // so a slow OpenRouter call (e.g. 1.5–3s) still gets hybrid search on this request.
@@ -681,7 +699,7 @@ async function resolveQueryEmbedding(
   const providerMs = Date.now() - providerStarted;
 
   if (waited.kind === 'ok') {
-    const embedding = waited.value;
+    const { embedding, providerMeta } = waited.value;
     const lateWrite = withWorkspaceContext(input.db, input.workspaceId, (tx) =>
       cache.store(tx, {
         workspaceId: input.workspaceId,
@@ -696,6 +714,8 @@ async function resolveQueryEmbedding(
       cache: 'miss',
       providerMs,
       cacheMs,
+      ...(providerMeta ? { providerMeta } : {}),
+      providerRequestShared: providerLoad.shared,
       ...(waited.slow ? { slowEmbedding: true } : {}),
       lateWrite,
     };
@@ -709,6 +729,7 @@ async function resolveQueryEmbedding(
       providerMs,
       cacheMs,
       ...(providerMeta ? { providerMeta } : {}),
+      providerRequestShared: providerLoad.shared,
       fallbackReason: extractFallbackReason(waited.error),
       ...(waited.slow ? { slowEmbedding: true } : {}),
     };
@@ -716,7 +737,7 @@ async function resolveQueryEmbedding(
 
   // Hard timeout — provider may still finish; warm cache for subsequent queries.
   const lateWrite = providerPromise
-    .then(async (embedding) => {
+    .then(async ({ embedding }) => {
       await withWorkspaceContext(input.db, input.workspaceId, (tx) =>
         cache.store(tx, {
           workspaceId: input.workspaceId,
@@ -735,6 +756,7 @@ async function resolveQueryEmbedding(
     providerMs,
     cacheMs,
     fallbackReason: 'timeout',
+    providerRequestShared: providerLoad.shared,
     slowEmbedding: true,
     lateWrite,
   };

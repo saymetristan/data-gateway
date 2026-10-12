@@ -8,7 +8,7 @@ import {
 } from '@data-gateway/core';
 import type { ApiEnv } from './env.js';
 
-export function createEmbeddingProvider(env: ApiEnv): EmbeddingProvider {
+export function createEmbeddingProvider(env: ApiEnv, providerOrder?: string[]): EmbeddingProvider {
   if (env.USE_MOCK_PROVIDERS || env.NODE_ENV === 'test' || !env.OPENROUTER_API_KEY) {
     return new MockEmbeddingProvider(env.EMBEDDING_DIMENSIONS);
   }
@@ -21,7 +21,21 @@ export function createEmbeddingProvider(env: ApiEnv): EmbeddingProvider {
     hardTimeoutMs: env.EMBEDDING_HARD_TIMEOUT_MS,
     circuitFailureThreshold: env.EMBEDDING_CIRCUIT_FAILURE_THRESHOLD,
     circuitRecoveryMs: env.EMBEDDING_CIRCUIT_RECOVERY_MS,
+    ...(providerOrder ? { providerOrder } : {}),
   });
+}
+
+/** Resolve routing only from the authenticated workspace, never the request body. */
+export function createWorkspaceEmbeddingProviderSelector(
+  env: ApiEnv,
+  defaultProvider: EmbeddingProvider,
+): (workspaceId: string) => EmbeddingProvider {
+  const providers = new Map(
+    Object.entries(env.EMBEDDING_PROVIDER_ORDER_BY_WORKSPACE ?? {}).map(([workspaceId, order]) =>
+      [workspaceId, createEmbeddingProvider(env, order)] as const,
+    ),
+  );
+  return (workspaceId) => providers.get(workspaceId) ?? defaultProvider;
 }
 
 export function createLlmProvider(env: ApiEnv): LlmProvider {

@@ -2,14 +2,16 @@ import { serve } from '@hono/node-server';
 import { createDb } from '@data-gateway/core';
 import { createApp } from './app.js';
 import { loadApiEnv } from './env.js';
-import { createEmbeddingProvider, createLlmProvider } from './providers.js';
+import { createEmbeddingProvider, createLlmProvider, createWorkspaceEmbeddingProviderSelector } from './providers.js';
 
 const env = loadApiEnv();
 const db = createDb(env.DATABASE_URL);
+const embeddingProvider = createEmbeddingProvider(env);
 const app = createApp({
   env,
   db,
-  embeddingProvider: createEmbeddingProvider(env),
+  embeddingProvider,
+  embeddingProviderForWorkspace: createWorkspaceEmbeddingProviderSelector(env, embeddingProvider),
   llmProvider: createLlmProvider(env),
 });
 
