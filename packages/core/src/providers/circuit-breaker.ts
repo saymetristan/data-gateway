@@ -1,5 +1,8 @@
 export type CircuitState = 'closed' | 'open' | 'half-open';
 
+/** Opaque lease for one logical request; completions from old generations are ignored. */
+export type CircuitAttempt = Readonly<{ generation: number }>;
+
 export type CircuitBreakerOptions = {
   failureThreshold?: number;
   recoveryMs?: number;
@@ -24,6 +27,10 @@ export class CircuitBreaker {
   private successesInHalfOpen = 0;
   private openedAt: number | null = null;
   private state: CircuitState = 'closed';
+  private generation = 0;
+  private readonly attempts = new Set<CircuitAttempt>();
+  private probe: CircuitAttempt | null = null;
+  private legacyProbe: CircuitAttempt | null = null;
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.failureThreshold = options.failureThreshold ?? 5;
@@ -42,11 +49,26 @@ export class CircuitBreaker {
 
   canRequest(now = Date.now()): boolean {
     this.maybeTransition(now);
-    return this.state !== 'open';
+    if (this.state === 'closed') return true;
+    const attempt = this.acquireRequest(now);
+    if (!attempt) return false;
+    this.legacyProbe = attempt;
+    return true;
   }
 
-  recordSuccess(now = Date.now()): void {
+  acquireRequest(now = Date.now()): CircuitAttempt | null {
     this.maybeTransition(now);
+    if (this.state === 'open' || (this.state === 'half-open' && this.probe)) return null;
+    const attempt = Object.freeze({ generation: this.generation });
+    this.attempts.add(attempt);
+    if (this.state === 'half-open') this.probe = attempt;
+    return attempt;
+  }
+
+  recordSuccess(now = Date.now(), attempt?: CircuitAttempt): void {
+    // Preserve the timestamp argument for legacy callers; only admission advances recovery.
+    void now;
+    if (!this.complete(attempt)) return;
     if (this.state === 'half-open') {
       this.successesInHalfOpen += 1;
       if (this.successesInHalfOpen >= this.halfOpenSuccesses) {
@@ -57,8 +79,8 @@ export class CircuitBreaker {
     this.failures = 0;
   }
 
-  recordFailure(now = Date.now()): void {
-    this.maybeTransition(now);
+  recordFailure(now = Date.now(), attempt?: CircuitAttempt): void {
+    if (!this.complete(attempt)) return;
     if (this.state === 'half-open') {
       this.trip(now);
       return;
@@ -73,6 +95,7 @@ export class CircuitBreaker {
     if (this.state === 'open' && this.openedAt !== null && now - this.openedAt >= this.recoveryMs) {
       this.state = 'half-open';
       this.successesInHalfOpen = 0;
+      this.invalidateAttempts();
     }
   }
 
@@ -80,6 +103,7 @@ export class CircuitBreaker {
     this.state = 'open';
     this.openedAt = now;
     this.successesInHalfOpen = 0;
+    this.invalidateAttempts();
   }
 
   private reset(): void {
@@ -87,6 +111,23 @@ export class CircuitBreaker {
     this.failures = 0;
     this.openedAt = null;
     this.successesInHalfOpen = 0;
+    this.invalidateAttempts();
+  }
+
+  private complete(attempt?: CircuitAttempt): boolean {
+    const lease = attempt ?? this.legacyProbe ?? undefined;
+    if (!lease) return this.state === 'closed';
+    if (lease.generation !== this.generation || !this.attempts.delete(lease)) return false;
+    if (this.probe === lease) this.probe = null;
+    if (this.legacyProbe === lease) this.legacyProbe = null;
+    return true;
+  }
+
+  private invalidateAttempts(): void {
+    this.generation += 1;
+    this.attempts.clear();
+    this.probe = null;
+    this.legacyProbe = null;
   }
 }
 

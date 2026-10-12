@@ -35,6 +35,7 @@ export type AppBindings = {
   env: ApiEnv;
   db: Database;
   embeddingProvider: EmbeddingProvider;
+  embeddingProviderForWorkspace?: (workspaceId: string) => EmbeddingProvider;
   llmProvider: LlmProvider;
 };
 

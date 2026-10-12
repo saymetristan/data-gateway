@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { queryEmbeddingCache } from '../db/schema/query-embedding-cache.js';
+import type { EmbeddingAttemptMeta } from '../providers/embeddings.js';
+
+export type QueryEmbeddingLoad = {
+  embedding: number[];
+  providerMeta?: EmbeddingAttemptMeta;
+};
 
 export const DEFAULT_QUERY_EMBEDDING_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const DEFAULT_L1_MAX_ENTRIES = 512;
@@ -50,7 +56,7 @@ export class QueryEmbeddingCache {
   private readonly ttlMs: number;
   private readonly l1MaxEntries: number;
   private readonly l1 = new Map<string, L1Entry>();
-  private readonly inflight = new Map<string, Promise<number[]>>();
+  private readonly inflight = new Map<string, Promise<QueryEmbeddingLoad>>();
 
   constructor(options: QueryEmbeddingCacheOptions = {}) {
     this.ttlMs = options.ttlMs ?? DEFAULT_QUERY_EMBEDDING_CACHE_TTL_MS;
@@ -259,13 +265,22 @@ export class QueryEmbeddingCache {
     key: string,
     loader: () => Promise<number[]>,
   ): Promise<number[]> {
+    const result = await this.resolveOrLoadWithMeta(key, async () => ({ embedding: await loader() })).promise;
+    return result.embedding;
+  }
+
+  /** Metadata lives only with the in-flight call, never in the persisted vector cache. */
+  resolveOrLoadWithMeta(
+    key: string,
+    loader: () => Promise<QueryEmbeddingLoad>,
+  ): { promise: Promise<QueryEmbeddingLoad>; shared: boolean } {
     const existing = this.inflight.get(key);
-    if (existing) return existing;
+    if (existing) return { promise: existing, shared: true };
     const promise = loader().finally(() => {
       this.inflight.delete(key);
     });
     this.inflight.set(key, promise);
-    return promise;
+    return { promise, shared: false };
   }
 
   clearL1(): void {

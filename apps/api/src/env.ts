@@ -21,6 +21,20 @@ export const apiEnvSchema = z.object({
   EMBEDDING_HARD_TIMEOUT_MS: z.coerce.number().int().positive().default(4_000),
   EMBEDDING_CIRCUIT_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(5),
   EMBEDDING_CIRCUIT_RECOVERY_MS: z.coerce.number().int().positive().default(30_000),
+  // Opt-in query routing; indexed vectors and other workspaces keep their defaults.
+  EMBEDDING_PROVIDER_ORDER_BY_WORKSPACE: z.preprocess(
+    (value) => typeof value === 'string' && value.trim() === '' ? undefined : value,
+    z.string().transform((value, ctx): unknown => {
+    try {
+      return JSON.parse(value);
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'must be a JSON workspace routing map' });
+      return z.NEVER;
+    }
+  }).pipe(z.record(
+    z.string().uuid().transform((value) => value.toLowerCase()),
+    z.array(z.string().regex(/^[a-z0-9][a-z0-9_/-]{0,99}$/)).min(1).max(8),
+  )).optional()),
   ENABLE_QUERY_SYNONYM_EXPANSION: z
     .enum(['true', 'false'])
     .default('true')
