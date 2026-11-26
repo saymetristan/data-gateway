@@ -6,6 +6,8 @@ import {
   runMigrations,
   apiKeys,
   mappings,
+  recordEmbeddings,
+  records,
   sourceProfiles,
   sources,
   workspaces,
@@ -590,6 +592,174 @@ describe.runIf(hasDatabase)('API integration', () => {
       }),
     });
     expect(invalidMapping.status).toBe(422);
+  });
+
+  it.each(['connected', 'profiled'] as const)(
+    'returns status for a %s source without an active mapping or counting historical embeddings',
+    async (maturityStatus) => {
+      const [workspace] = await db
+        .insert(workspaces)
+        .values({ name: 'Status without mapping', slug: `status-${crypto.randomUUID()}` })
+        .returning();
+      if (!workspace) throw new Error('workspace missing');
+      const generated = generateApiKey();
+      await db.insert(apiKeys).values({
+        workspaceId: workspace.id,
+        keyHash: generated.hash,
+        prefix: generated.prefix,
+        scopes: ['sources:read'],
+      });
+      const [source] = await db
+        .insert(sources)
+        .values({
+          workspaceId: workspace.id,
+          type: 'csv',
+          name: 'Unmapped status source',
+          config: {},
+          maturityStatus,
+        })
+        .returning();
+      if (!source) throw new Error('source missing');
+      if (maturityStatus === 'profiled') {
+        await db.insert(mappings).values({
+          sourceId: source.id,
+          version: 2,
+          status: 'draft',
+          document: { entities: [] },
+        });
+      }
+      const [record] = await db
+        .insert(records)
+        .values({
+          workspaceId: workspace.id,
+          sourceId: source.id,
+          entity: 'product',
+          externalId: 'historical',
+          mappingVersion: 1,
+        })
+        .returning();
+      if (!record) throw new Error('record missing');
+      await db.insert(recordEmbeddings).values({
+        recordId: record.id,
+        embedding: Array.from({ length: 1024 }, () => 0),
+        embeddingModel: 'mock-embedding',
+        mappingVersion: 1,
+      });
+
+      const response = await app.request(`/sources/${source.id}/status`, {
+        headers: { Authorization: `Bearer ${generated.key}` },
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        sourceId: source.id,
+        maturityStatus,
+        lastSyncedAt: null,
+        rawRecords: 0,
+        counts: { raw: 0, records: 1, embeddings: 0 },
+      });
+      const [unchanged] = await db.select().from(sources).where(eq(sources.id, source.id));
+      expect(unchanged?.maturityStatus).toBe(maturityStatus);
+    },
+  );
+
+  it('counts status embeddings only for the source, active mapping and current model with read access', async () => {
+    const [workspace, otherWorkspace] = await db
+      .insert(workspaces)
+      .values([
+        { name: 'Status counts', slug: `status-counts-${crypto.randomUUID()}` },
+        { name: 'Other status workspace', slug: `status-other-${crypto.randomUUID()}` },
+      ])
+      .returning();
+    if (!workspace || !otherWorkspace) throw new Error('workspaces missing');
+    const readKey = generateApiKey();
+    const writeKey = generateApiKey();
+    const otherKey = generateApiKey();
+    await db.insert(apiKeys).values([
+      {
+        workspaceId: workspace.id,
+        keyHash: readKey.hash,
+        prefix: readKey.prefix,
+        scopes: ['sources:read'],
+      },
+      {
+        workspaceId: workspace.id,
+        keyHash: writeKey.hash,
+        prefix: writeKey.prefix,
+        scopes: ['sources:write'],
+      },
+      {
+        workspaceId: otherWorkspace.id,
+        keyHash: otherKey.hash,
+        prefix: otherKey.prefix,
+        scopes: ['sources:read'],
+      },
+    ]);
+    const [source, otherSource] = await db
+      .insert(sources)
+      .values([
+        {
+          workspaceId: workspace.id,
+          type: 'csv',
+          name: 'Status source',
+          config: {},
+          maturityStatus: 'indexed',
+        },
+        { workspaceId: workspace.id, type: 'csv', name: 'Other source', config: {} },
+      ])
+      .returning();
+    if (!source || !otherSource) throw new Error('sources missing');
+    await db.insert(mappings).values([
+      { sourceId: source.id, version: 2, status: 'active', document: { entities: [] } },
+      { sourceId: source.id, version: 3, status: 'draft', document: { entities: [] } },
+    ]);
+    const [record, otherRecord] = await db
+      .insert(records)
+      .values([
+        {
+          workspaceId: workspace.id,
+          sourceId: source.id,
+          entity: 'product',
+          externalId: 'own',
+          mappingVersion: 2,
+        },
+        {
+          workspaceId: workspace.id,
+          sourceId: otherSource.id,
+          entity: 'product',
+          externalId: 'other',
+          mappingVersion: 2,
+        },
+      ])
+      .returning();
+    if (!record || !otherRecord) throw new Error('records missing');
+    const embedding = Array.from({ length: 1024 }, () => 0);
+    await db.insert(recordEmbeddings).values([
+      { recordId: record.id, embedding, embeddingModel: 'mock-embedding', mappingVersion: 2 },
+      { recordId: record.id, embedding, embeddingModel: 'mock-embedding', mappingVersion: 1 },
+      { recordId: record.id, embedding, embeddingModel: 'mock-embedding', mappingVersion: 3 },
+      { recordId: record.id, embedding, embeddingModel: 'old-model', mappingVersion: 2 },
+      { recordId: otherRecord.id, embedding, embeddingModel: 'mock-embedding', mappingVersion: 2 },
+    ]);
+
+    const response = await app.request(`/sources/${source.id}/status`, {
+      headers: { Authorization: `Bearer ${readKey.key}` },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      sourceId: source.id,
+      maturityStatus: 'indexed',
+      counts: { raw: 0, records: 1, embeddings: 1 },
+    });
+
+    const crossWorkspace = await app.request(`/sources/${source.id}/status`, {
+      headers: { Authorization: `Bearer ${otherKey.key}` },
+    });
+    expect(crossWorkspace.status).toBe(404);
+    const withoutReadScope = await app.request(`/sources/${source.id}/status`, {
+      headers: { Authorization: `Bearer ${writeKey.key}` },
+    });
+    expect(withoutReadScope.status).toBe(401);
   });
 
   it('queues a profile-only database sync without changing the default contract', async () => {

@@ -173,6 +173,8 @@ curl "https://data.whaapy.com/sources/$SOURCE_ID/status" \
   -H "Authorization: Bearer $WORKSPACE_KEY"
 ```
 
+Puedes consultar `/status` antes de crear el mapping. Una fuente `connected` o `profiled` sin mapping activo devuelve HTTP 200 con su estado real y `counts.embeddings` en `0`.
+
 La verificación final debe devolver `maturityStatus: "agent_ready"` y conteos de `records` y `embeddings` mayores que cero.
 
 Todas sus herramientas declaradas (`search_product`, etc.) ahora aparecerán cuando tu cliente MCP interrogue la lista de herramientas. Procede a la sección de [Integración MCP](/mcp/overview) para empezar a consultarla.

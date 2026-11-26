@@ -361,22 +361,27 @@ export function sourceRoutes(deps: AppBindings) {
     const workspaceId = c.get('workspaceId');
     const sourceId = sourceIdParam(c.req.param('id'));
     await getSourceForWorkspace(db, workspaceId, sourceId);
-    const activeMapping = await getActiveMapping(db, sourceId);
+    const activeMapping = await getActiveMapping(db, sourceId).catch((error: unknown) => {
+      if (error instanceof GatewayError && error.code === 'conflict') return null;
+      throw error;
+    });
 
     const [status, recordCountRows, embeddingCountRows] = await Promise.all([
       getSourceStatus(db, sourceId),
       db.select({ count: count() }).from(records).where(eq(records.sourceId, sourceId)),
-      db
-        .select({ count: count() })
-        .from(recordEmbeddings)
-        .innerJoin(records, eq(recordEmbeddings.recordId, records.id))
-        .where(
-          and(
-            eq(records.sourceId, sourceId),
-            eq(recordEmbeddings.mappingVersion, activeMapping.version),
-            eq(recordEmbeddings.embeddingModel, deps.embeddingProvider.model),
-          ),
-        ),
+      activeMapping
+        ? db
+            .select({ count: count() })
+            .from(recordEmbeddings)
+            .innerJoin(records, eq(recordEmbeddings.recordId, records.id))
+            .where(
+              and(
+                eq(records.sourceId, sourceId),
+                eq(recordEmbeddings.mappingVersion, activeMapping.version),
+                eq(recordEmbeddings.embeddingModel, deps.embeddingProvider.model),
+              ),
+            )
+        : [],
     ]);
     const [recordCount] = recordCountRows;
     const [embeddingCount] = embeddingCountRows;
